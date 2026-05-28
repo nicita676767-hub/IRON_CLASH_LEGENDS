@@ -1507,3 +1507,184 @@ button:disabled {
     transform: scale(0.72);
   }
 }
+
+@media (orientation: portrait) and (max-width: 900px) {
+  html,
+  body {
+    width: 100%;
+    height: 100%;
+    overflow: hidden;
+  }
+
+  .game {
+    width: 100vw;
+    height: 100dvh;
+    min-height: 0;
+    padding: 6px;
+    gap: 6px;
+    grid-template-rows: 54px minmax(0, 1fr) 96px;
+    overflow: hidden;
+  }
+
+  .hud-top {
+    grid-template-columns: minmax(0, 1fr) 82px minmax(0, 1fr);
+    padding: 6px;
+  }
+
+  .base-card {
+    height: 42px;
+    padding: 5px 8px;
+  }
+
+  .base-card span {
+    font-size: 10px;
+  }
+
+  .base-card strong {
+    font-size: 18px;
+  }
+
+  .timer {
+    height: 30px;
+    font-size: 18px;
+  }
+
+  .surrender-btn {
+    height: 20px;
+    font-size: 10px;
+  }
+
+  .arena-shell {
+    min-height: 0;
+    overflow: hidden;
+  }
+
+  #gameCanvas {
+    position: absolute;
+    top: 0;
+    left: 50%;
+    width: auto;
+    min-width: 100%;
+    height: 100%;
+    max-width: none;
+    transform: translateX(-50%);
+  }
+
+  .hud-bottom {
+    height: 96px;
+    grid-template-columns: 70px minmax(0, 1fr);
+    gap: 5px;
+    padding: 5px;
+    overflow: hidden;
+  }
+
+  .energy-box {
+    justify-content: center;
+    min-width: 0;
+  }
+
+  .energy-box > div:first-child {
+    display: grid;
+    gap: 1px;
+    justify-content: start;
+  }
+
+  .energy-box span {
+    font-size: 9px;
+    line-height: 1;
+  }
+
+  .energy-box strong {
+    font-size: 17px;
+    line-height: 0.95;
+  }
+
+  .energy-track {
+    height: 11px;
+    margin-top: 7px;
+  }
+
+  .hand {
+    grid-template-columns: repeat(5, minmax(0, 1fr));
+    gap: 4px;
+    min-width: 0;
+  }
+
+  .card {
+    height: 86px;
+    min-height: 0;
+    padding: 4px 3px;
+    grid-template-rows: 39px 1fr;
+    gap: 2px;
+    border-radius: 7px;
+  }
+
+  .card:hover,
+  .card.selected {
+    transform: translateY(-2px) scale(1.012);
+  }
+
+  .card-head {
+    display: grid;
+    grid-template-columns: 1fr;
+    justify-items: center;
+    gap: 0;
+  }
+
+  .portrait {
+    width: 38px;
+    height: 38px;
+  }
+
+  .portrait .mini {
+    transform: scale(0.74);
+    transform-origin: center;
+  }
+
+  .cost {
+    position: absolute;
+    top: 3px;
+    right: 3px;
+    width: 21px;
+    height: 21px;
+    flex-basis: 21px;
+    font-size: 12px;
+  }
+
+  .card strong {
+    align-self: center;
+    width: 100%;
+    font-size: 9px;
+    line-height: 1.04;
+    text-align: center;
+    overflow: hidden;
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    -webkit-box-orient: vertical;
+    overflow-wrap: anywhere;
+  }
+
+  .card small {
+    display: none;
+  }
+
+  .cooldown-badge {
+    inset: auto 3px 3px 3px;
+    min-height: 17px;
+    font-size: 8.5px;
+  }
+
+  .lane-tabs {
+    left: 8px;
+    top: 8px;
+    gap: 5px;
+    padding: 6px;
+  }
+
+  .lane-tabs button {
+    min-width: 54px;
+    min-height: 42px;
+    padding: 0 8px;
+    font-size: 12px;
+  }
+}

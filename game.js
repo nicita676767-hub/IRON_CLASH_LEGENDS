@@ -38,6 +38,12 @@ const laneButtons = [...document.querySelectorAll(".lane-tabs button")];
 const W = canvas.width;
 const H = canvas.height;
 const LOW_POWER_VIEW = window.matchMedia?.("(max-width: 700px)")?.matches || false;
+function syncMobileViewClass() {
+  const mobileLike = window.innerHeight > window.innerWidth && Math.min(window.innerWidth, window.screen?.width || window.innerWidth) <= 900;
+  document.documentElement.classList.toggle("mobile-view", mobileLike);
+}
+syncMobileViewClass();
+window.addEventListener("resize", syncMobileViewClass);
 const SAVE_KEY = "iron-clash-legends-save-v1";
 const RESET_PROGRESS_KEY = "iron-clash-legends-progress-reset-2026-05-27";
 const STARTER_CARDS = ["tank", "ranger", "swordsman", "mage", "catgirl", "fireball", "freeze", "heal", "haste"];
