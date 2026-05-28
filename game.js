@@ -1,5 +1,6 @@
 const canvas = document.querySelector("#gameCanvas");
-const ctx = canvas.getContext("2d");
+let ctx = canvas.getContext("2d");
+const mainCtx = ctx;
 const handEl = document.querySelector("#hand");
 const energyText = document.querySelector("#energyText");
 const energyFill = document.querySelector("#energyFill");
@@ -41,6 +42,7 @@ const LOW_POWER_VIEW = window.matchMedia?.("(max-width: 700px)")?.matches || fal
 function syncMobileViewClass() {
   const mobileLike = window.innerHeight > window.innerWidth && Math.min(window.innerWidth, window.screen?.width || window.innerWidth) <= 900;
   document.documentElement.classList.toggle("mobile-view", mobileLike);
+  if (window.__ironClashStateReady) invalidateArenaCache();
 }
 syncMobileViewClass();
 window.addEventListener("resize", syncMobileViewClass);
@@ -221,10 +223,10 @@ const deck = [
     desc: "Летает над ближним боем",
     stats: { hp: 450, damage: 67, range: 185, speed: 44, cooldown: 1.34, size: 30, role: "dragon", splash: 85, flying: true },
   },
-  { id: "fireball", kind: "spell", name: "Огненный шар", short: "O", cost: 4, tone: "#ff774d", desc: "Взрыв по линии" },
+  { id: "fireball", kind: "spell", name: "Огненный шар", short: "O", cost: 3, tone: "#ff774d", desc: "Взрыв по линии" },
   { id: "freeze", kind: "spell", name: "Ледяная печать", short: "Л", cost: 2, tone: "#91e8ff", desc: "Остановить рывок" },
   { id: "heal", kind: "spell", name: "Свет жизни", short: "+", cost: 3, tone: "#6ee7a3", desc: "Спасти отряд" },
-  { id: "lightning", kind: "spell", name: "Гром", short: "!", cost: 4, tone: "#f8f1dd", desc: "Добить сильного" },
+  { id: "lightning", kind: "spell", name: "Гром", short: "!", cost: 3, tone: "#f8f1dd", desc: "Добить сильного" },
   { id: "repair", kind: "spell", name: "Починка", short: "R", cost: 2, tone: "#79d7ff", desc: "Чинит базу" },
   { id: "haste", kind: "spell", name: "Боевой клич", short: ">", cost: 2, tone: "#ffd36b", desc: "Ускорить атаку" },
 ];
@@ -328,6 +330,8 @@ const state = {
   projectiles: [],
   towerShots: [],
   effects: [],
+  arenaCache: null,
+  arenaCacheKey: "",
   shake: 0,
   hitStop: 0,
   nextUnitId: 1,
@@ -341,6 +345,7 @@ const state = {
   soundOn: true,
   audio: null,
 };
+window.__ironClashStateReady = true;
 
 function loadSave() {
   try {
@@ -504,10 +509,10 @@ function activeCampaignLevel() {
 
 function spellCooldownDuration(spell) {
   const cooldowns = {
-    fireball: 5.2,
+    fireball: 6.24,
     freeze: 6,
     heal: 5.4,
-    lightning: 7,
+    lightning: 9.1,
     repair: 20,
     haste: 4.4,
   };
@@ -704,7 +709,7 @@ function cardStatsLabel(card) {
     fireball: "100 урона + горение",
     freeze: "10 урона + заморозка",
     heal: "200 HP за 4 сек + щит",
-    lightning: "400 урона по самому живучему",
+    lightning: "350 урона по самому живучему",
     repair: "+110 HP базе · 20 сек",
     haste: "ускорение + малое лечение",
   };
@@ -1035,7 +1040,7 @@ function spawnSkeleton(team, lane, y, xHint = null, pathStepHint = 1) {
 
 function charmOnSpawn(unit) {
   state.units
-    .filter((other) => other.team !== unit.team && Math.hypot(other.x - unit.x, other.y - unit.y) <= 165)
+    .filter((other) => other.team !== unit.team && Math.hypot(other.x - unit.x, other.y - unit.y) <= 231)
     .forEach((enemy) => {
       enemy.stun = Math.max(enemy.stun || 0, 2);
       enemy.flash = 0.3;
@@ -1097,7 +1102,7 @@ function castSpell(team, spell, lane, targetX = null, targetY = null) {
       .filter((unit) => unit.team === foe && unit.lane === lane)
       .sort((a, b) => b.hp - a.hp || Math.abs(a.y - offensiveY) - Math.abs(b.y - offensiveY))[0];
     if (target) {
-      hitUnit(target, 400);
+      hitUnit(target, 350);
       bolt(target.x, target.y - (target.flying ? 42 : 0));
     } else {
       hitBase(foe, 60);
@@ -1938,14 +1943,41 @@ function openLobby() {
   requestAnimationFrame(loop);
 }
 
+function invalidateArenaCache() {
+  if (!window.__ironClashStateReady) return;
+  state.arenaCache = null;
+  state.arenaCacheKey = "";
+}
+
+function arenaCacheKey() {
+  return `${isLowPowerMode() ? 1 : 0}:${state.selectedLane}:${W}x${H}`;
+}
+
+function drawCachedArena() {
+  const key = arenaCacheKey();
+  if (!state.arenaCache || state.arenaCacheKey !== key) {
+    const cache = document.createElement("canvas");
+    cache.width = W;
+    cache.height = H;
+    const previousCtx = ctx;
+    ctx = cache.getContext("2d");
+    drawArena();
+    ctx = previousCtx;
+    state.arenaCache = cache;
+    state.arenaCacheKey = key;
+  }
+  ctx.drawImage(state.arenaCache, 0, 0);
+}
+
 function draw() {
+  ctx = mainCtx;
   ctx.clearRect(0, 0, W, H);
   ctx.save();
   if (state.shake > 0) {
     const power = state.shake;
     ctx.translate((Math.random() - 0.5) * power, (Math.random() - 0.5) * power);
   }
-  drawArena();
+  drawCachedArena();
   drawLaneHighlights();
   drawBases();
   state.units.sort((a, b) => a.y - b.y || a.x - b.x).forEach(drawUnit);
@@ -1972,7 +2004,7 @@ function drawArena() {
   }
   ctx.fillRect(0, 0, W, H);
 
-  if (!isLowPowerMode()) drawBackdropDetails();
+  drawBackdropDetails();
   drawGrass();
 
   const topY = ROAD_TOP_Y;
@@ -2001,17 +2033,6 @@ function drawRoadPath(points, width, radius = 86) {
   ctx.save();
   ctx.lineCap = "round";
   ctx.lineJoin = "round";
-  if (isLowPowerMode()) {
-    [["#9a7230", width + 8], ["#f3cb65", width - 4]].forEach(([color, lineWidth]) => {
-      ctx.strokeStyle = color;
-      ctx.lineWidth = lineWidth;
-      ctx.beginPath();
-      drawRoundedPolyline(points, radius);
-      ctx.stroke();
-    });
-    ctx.restore();
-    return;
-  }
   [["#806326", width + 18], ["#bd8a35", width + 8], ["#f3cb65", width], ["#f8db80", width - 18]].forEach(([color, lineWidth]) => {
     ctx.strokeStyle = color;
     ctx.lineWidth = lineWidth;
@@ -2118,6 +2139,26 @@ function drawBackdropDetails() {
   ctx.restore();
 }
 
+function drawLightBackdropDetails() {
+  ctx.save();
+  ctx.globalAlpha = 0.65;
+  [
+    { x: 84, y: 120, s: 0.78 },
+    { x: W - 84, y: 156, s: 0.76 },
+    { x: 96, y: 650, s: 0.7 },
+    { x: W - 104, y: 660, s: 0.74 },
+  ].forEach((tree) => drawBush(tree.x, tree.y, tree.s));
+  ctx.fillStyle = "rgba(255, 248, 223, 0.36)";
+  for (let i = 0; i < 8; i += 1) {
+    const x = (i * 173 + 120) % W;
+    const y = (i * 97 + 92) % H;
+    ctx.beginPath();
+    ctx.arc(x, y, 3, 0, Math.PI * 2);
+    ctx.fill();
+  }
+  ctx.restore();
+}
+
 function drawTree(x, y, scale = 1) {
   ctx.save();
   ctx.translate(x, y);
@@ -2163,7 +2204,7 @@ function drawBush(x, y, scale = 1) {
 function drawGrass() {
   ctx.save();
   ctx.globalAlpha = 0.32;
-  const grassCount = isLowPowerMode() ? 34 : 190;
+  const grassCount = 190;
   for (let i = 0; i < grassCount; i += 1) {
     const x = (i * 97) % W;
     const y = (i * 53) % H;
@@ -3239,15 +3280,15 @@ function sound(type) {
     start: [[330, 0.08, "triangle", 0.05], [500, 0.09, "triangle", 0.045, 0.07], [700, 0.12, "triangle", 0.04, 0.15]],
     summon: [[190, 0.08, "square", 0.035], [310, 0.13, "triangle", 0.04, 0.04]],
     enemy: [[180, 0.06, "sawtooth", 0.025]],
-    hit: [[250, 0.05, "square", 0.035]],
-    death: [[210, 0.05, "triangle", 0.035], [95, 0.12, "sine", 0.028, 0.04]],
-    base: [[95, 0.16, "sawtooth", 0.045]],
-    tower: [[360, 0.05, "square", 0.025], [520, 0.04, "triangle", 0.02, 0.03]],
-    towerHit: [[190, 0.05, "square", 0.028]],
-    fireball: [[130, 0.08, "sawtooth", 0.045], [80, 0.18, "sawtooth", 0.035, 0.04]],
+    hit: [[180, 0.045, "sine", 0.018], [95, 0.07, "triangle", 0.012, 0.01]],
+    death: [[170, 0.06, "triangle", 0.022], [82, 0.12, "sine", 0.018, 0.04]],
+    base: [[82, 0.12, "triangle", 0.026], [120, 0.08, "sine", 0.014, 0.03]],
+    tower: [[320, 0.04, "triangle", 0.018], [460, 0.04, "sine", 0.012, 0.03]],
+    towerHit: [[145, 0.055, "triangle", 0.016]],
+    fireball: [[105, 0.08, "triangle", 0.028], [72, 0.16, "sine", 0.02, 0.04]],
     freeze: [[680, 0.08, "sine", 0.035], [920, 0.12, "sine", 0.026, 0.05]],
     heal: [[520, 0.08, "sine", 0.032], [650, 0.1, "sine", 0.03, 0.07], [820, 0.12, "sine", 0.026, 0.15]],
-    lightning: [[1200, 0.04, "square", 0.04], [180, 0.12, "sawtooth", 0.045, 0.04]],
+    lightning: [[760, 0.035, "triangle", 0.024], [160, 0.1, "sine", 0.025, 0.04]],
     repair: [[330, 0.08, "triangle", 0.035], [470, 0.09, "triangle", 0.033, 0.06], [620, 0.12, "sine", 0.028, 0.14]],
     haste: [[430, 0.05, "triangle", 0.035], [610, 0.05, "triangle", 0.033, 0.045], [790, 0.05, "triangle", 0.03, 0.09]],
     win: [[520, 0.09, "triangle", 0.05], [660, 0.09, "triangle", 0.045, 0.08], [880, 0.16, "triangle", 0.04, 0.17]],
@@ -3302,7 +3343,7 @@ function updateUi() {
 }
 
 function loop(time) {
-  if (isLowPowerMode() && state.lastTime && time - state.lastTime < 32) {
+  if (isLowPowerMode() && state.lastTime && time - state.lastTime < 20) {
     requestAnimationFrame(loop);
     return;
   }
