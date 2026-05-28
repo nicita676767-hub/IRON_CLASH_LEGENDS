@@ -1,0 +1,122 @@
+<!doctype html>
+<html lang="ru">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Iron Clash Legends</title>
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <main class="game">
+      <section class="hud hud-top">
+        <div class="base-card enemy">
+          <span>База врага</span>
+          <strong id="enemyBaseText">1000</strong>
+          <div class="hp-track"><i id="enemyBaseFill"></i></div>
+        </div>
+        <div class="match-core">
+          <div class="logo">
+            <b>Iron Clash</b>
+            <span>Legends</span>
+          </div>
+          <div class="timer" id="timerText">03:00</div>
+          <button class="surrender-btn hidden" id="surrenderBtn">Сдаться</button>
+        </div>
+        <div class="base-card player">
+          <span>Твоя база</span>
+          <strong id="playerBaseText">1000</strong>
+          <div class="hp-track"><i id="playerBaseFill"></i></div>
+        </div>
+      </section>
+
+      <section class="arena-shell">
+        <canvas id="gameCanvas" width="1400" height="820" aria-label="Поле боя Iron Clash Legends"></canvas>
+        <noscript>
+          <div class="mode-panel">
+            <h1>Нужен браузер</h1>
+            <p>Игра запускается только в браузере с включенным JavaScript. Если видишь этот текст, файл открыт не как игра.</p>
+          </div>
+        </noscript>
+
+        <div class="lane-tabs" id="laneTabs">
+          <button data-lane="0">Лево</button>
+          <button class="active" data-lane="1">Центр</button>
+          <button data-lane="2">Право</button>
+        </div>
+
+        <div class="mode-panel" id="modePanel">
+          <h1>Iron Clash Legends</h1>
+          <p id="startCopy">Загрузка игры...</p>
+          <div class="deck-editor">
+            <div class="deck-editor-head">
+              <strong>Колода</strong>
+              <span id="deckCount">5 / 5</span>
+              <span class="coin-wallet" id="coinText">0 монет</span>
+            </div>
+            <div class="progress-panel" id="progressPanel">
+              <div>
+                <b id="progressLevel">Уровень 1</b>
+                <span id="progressStats">0 XP · 0 побед · 0 поражений</span>
+              </div>
+              <button id="dailyBonusBtn">Дневной бонус</button>
+            </div>
+            <div class="deck-grid" id="deckGrid"></div>
+          </div>
+          <div class="difficulty-box">
+            <strong>Сложность бота</strong>
+            <div class="difficulty-options" id="difficultyOptions">
+              <button class="active" data-difficulty="easy">Легко</button>
+              <button data-difficulty="normal">Нормально</button>
+              <button data-difficulty="hard">Сложно</button>
+              <button data-difficulty="impossible">Невозможно</button>
+            </div>
+          </div>
+          <div class="mode-actions">
+            <button id="trainingBtn">Рейтинговый матч</button>
+            <button id="quickBtn">Быстрый матч</button>
+            <button id="endlessBtn">Бесконечная осада</button>
+            <button id="campaignBtn">Кампания</button>
+          </div>
+          <button class="sound-toggle" id="soundToggle">Звук: вкл</button>
+          <small>Рейтинг: победа +10 кубков, поражение -10. Сила врага растет каждые 20 кубков и не зависит от сложности в лобби.</small>
+        </div>
+
+        <div class="campaign-panel hidden" id="campaignPanel">
+          <div class="campaign-head">
+            <div>
+              <span>Кампания</span>
+              <h2>Железный путь</h2>
+            </div>
+            <button id="campaignBackBtn">Назад</button>
+          </div>
+          <div class="campaign-map" id="campaignMap"></div>
+        </div>
+
+        <div class="toast hidden" id="toast"></div>
+
+        <div class="result hidden" id="resultPanel">
+          <h2 id="resultTitle">Победа</h2>
+          <p id="resultCopy">База противника разрушена.</p>
+          <button id="restartBtn">Играть снова</button>
+          <button id="lobbyBtn">В лобби</button>
+        </div>
+      </section>
+
+      <section class="hud hud-bottom">
+        <div class="energy-box">
+          <div>
+            <span>Энергия</span>
+            <strong id="energyText">4 / 10</strong>
+          </div>
+          <div class="energy-track">
+            <i id="energyFill"></i>
+          </div>
+        </div>
+        <div class="hand" id="hand"></div>
+      </section>
+    </main>
+
+    <script src="yandex.js" defer></script>
+    <script src="game.js" defer></script>
+  </body>
+</html>
