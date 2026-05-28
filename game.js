@@ -49,6 +49,24 @@ window.addEventListener("resize", syncMobileViewClass);
 function isLowPowerMode() {
   return LOW_POWER_VIEW || document.documentElement.classList.contains("mobile-view") || Boolean(window.matchMedia?.("(pointer: coarse) and (orientation: portrait)")?.matches);
 }
+function renderScale() {
+  return isLowPowerMode() ? 0.72 : 1;
+}
+
+function applyRenderScale() {
+  const scale = renderScale();
+  const targetWidth = Math.max(1, Math.round(W * scale));
+  const targetHeight = Math.max(1, Math.round(H * scale));
+  if (canvas.width !== targetWidth || canvas.height !== targetHeight) {
+    canvas.width = targetWidth;
+    canvas.height = targetHeight;
+    invalidateArenaCache();
+  }
+  ctx = mainCtx;
+  ctx.setTransform(scale, 0, 0, scale, 0, 0);
+}
+
+const unitSpriteCache = new Map();
 const SAVE_KEY = "iron-clash-legends-save-v1";
 const RESET_PROGRESS_KEY = "iron-clash-legends-progress-reset-2026-05-27";
 const STARTER_CARDS = ["tank", "ranger", "swordsman", "mage", "catgirl", "fireball", "freeze", "heal", "haste"];
@@ -672,7 +690,7 @@ function renderHand() {
     button.addEventListener("click", () => selectOrPlay(card.id));
     handEl.appendChild(button);
   });
-  updateUi();
+  updateUi(true);
 }
 
 startCopy.textContent = "Мультяшные средневековые дуэли: выбери карту, линию и разрушь вражеский замок за 3 минуты.";
@@ -896,7 +914,7 @@ function selectOrPlay(cardId) {
     state.selectedCard = cardId;
     showToast(card.kind === "spell" ? `${card.name}: кликни место на поле` : `${card.name}: нажми линию`);
     sound("select");
-    updateUi();
+    updateUi(true);
     return;
   }
   playSelected();
@@ -1950,27 +1968,32 @@ function invalidateArenaCache() {
 }
 
 function arenaCacheKey() {
-  return `${isLowPowerMode() ? 1 : 0}:${state.selectedLane}:${W}x${H}`;
+  return `${renderScale()}:${state.selectedLane}:${W}x${H}`;
 }
 
 function drawCachedArena() {
   const key = arenaCacheKey();
   if (!state.arenaCache || state.arenaCacheKey !== key) {
+    const scale = renderScale();
     const cache = document.createElement("canvas");
-    cache.width = W;
-    cache.height = H;
+    cache.width = Math.max(1, Math.round(W * scale));
+    cache.height = Math.max(1, Math.round(H * scale));
     const previousCtx = ctx;
     ctx = cache.getContext("2d");
+    ctx.setTransform(scale, 0, 0, scale, 0, 0);
     drawArena();
     ctx = previousCtx;
     state.arenaCache = cache;
     state.arenaCacheKey = key;
   }
+  ctx.save();
+  ctx.setTransform(1, 0, 0, 1, 0, 0);
   ctx.drawImage(state.arenaCache, 0, 0);
+  ctx.restore();
 }
 
 function draw() {
-  ctx = mainCtx;
+  applyRenderScale();
   ctx.clearRect(0, 0, W, H);
   ctx.save();
   if (state.shake > 0) {
@@ -2449,6 +2472,14 @@ function drawUnit(unit) {
   ctx.beginPath();
   ctx.ellipse(0, unit.size + (unit.flying ? 46 : 14), unit.size * (unit.flying ? 1.8 : 1.28), unit.flying ? 14 : 11, 0, 0, Math.PI * 2);
   ctx.stroke();
+
+  if (isLowPowerMode()) {
+    drawCachedUnitSprite(unit);
+    drawUnitStatusOverlays(unit);
+    ctx.restore();
+    miniBar(unit.x - 28, unit.y - unit.size - 30, 56, 8, unit.hp / unit.maxHp, unit.team === "player" ? palette.green : palette.enemy);
+    return;
+  }
 
   if (unit.role === "dragon") {
     drawDragonBody(unit, attackPulse);
@@ -3150,6 +3181,243 @@ function drawPreviewUnit(x, y, team, role, size) {
   });
 }
 
+function drawCachedUnitSprite(unit) {
+  const sprite = getUnitSprite(unit);
+  ctx.drawImage(sprite.canvas, -sprite.anchorX, -sprite.anchorY, sprite.width, sprite.height);
+}
+
+function getUnitSprite(unit) {
+  const key = `${unit.team}:${unit.role}:${Math.round(unit.size)}:${unit.freeze > 0 ? "ice" : "normal"}`;
+  const cached = unitSpriteCache.get(key);
+  if (cached) return cached;
+  const size = unit.size;
+  const width = Math.ceil(size * 5.6);
+  const height = Math.ceil(size * 5.8);
+  const canvas = document.createElement("canvas");
+  canvas.width = width;
+  canvas.height = height;
+  const g = canvas.getContext("2d");
+  const ox = width / 2;
+  const oy = height / 2 + size * 0.35;
+  const teamColor = unit.team === "player" ? palette.player : palette.enemy;
+  const bodyColor = unit.role === "catgirl" ? "#ff9bd5" : unit.freeze > 0 ? palette.ice : teamColor;
+  g.translate(ox, oy);
+  g.lineJoin = "round";
+  g.lineCap = "round";
+  drawUnitSpriteShape(g, unit.role, size, bodyColor, unit.team, unit.freeze > 0);
+  const sprite = { canvas, width, height, anchorX: ox, anchorY: oy };
+  unitSpriteCache.set(key, sprite);
+  return sprite;
+}
+
+function drawUnitSpriteShape(g, role, size, bodyColor, team, frozen) {
+  const dark = "#39261a";
+  const skin = "#f0b879";
+  const stroke = "rgba(54,34,21,0.45)";
+  if (role === "dragon") {
+    g.fillStyle = frozen ? palette.ice : "#d94b3f";
+    g.beginPath();
+    g.ellipse(0, 0, size * 1.35, size * 0.72, 0, 0, Math.PI * 2);
+    g.fill();
+    g.strokeStyle = "#7f2530";
+    g.lineWidth = 3;
+    g.stroke();
+    g.fillStyle = frozen ? "#d9fbff" : "#ff9f43";
+    g.beginPath();
+    g.moveTo(-size * 0.35, -size * 0.35);
+    g.lineTo(-size * 1.65, -size * 1.2);
+    g.lineTo(-size * 1.0, size * 0.05);
+    g.closePath();
+    g.moveTo(size * 0.35, -size * 0.35);
+    g.lineTo(size * 1.65, -size * 1.2);
+    g.lineTo(size * 1.0, size * 0.05);
+    g.closePath();
+    g.fill();
+    g.fillStyle = "#fff0bd";
+    g.beginPath();
+    g.arc(size * 1.18, -size * 0.2, size * 0.42, 0, Math.PI * 2);
+    g.fill();
+    return;
+  }
+  if (role === "catapult") {
+    g.fillStyle = "#8a5a32";
+    spriteRounded(g, -size * 1.25, -size * 0.35, size * 2.5, size * 1.1, 8);
+    g.fill();
+    g.strokeStyle = "#3a2418";
+    g.lineWidth = 5;
+    g.beginPath();
+    g.moveTo(-size * 0.9, size * 0.65);
+    g.lineTo(0, -size * 0.7);
+    g.lineTo(size * 1.15, -size * 1.05);
+    g.stroke();
+    g.fillStyle = "#2f241c";
+    g.beginPath();
+    g.arc(-size * 0.78, size * 0.82, 9, 0, Math.PI * 2);
+    g.arc(size * 0.78, size * 0.82, 9, 0, Math.PI * 2);
+    g.fill();
+    return;
+  }
+  if (role === "skeleton") {
+    g.strokeStyle = "#edf0df";
+    g.fillStyle = "#edf0df";
+    g.lineWidth = 4;
+    g.beginPath();
+    g.arc(0, -size * 1.08, size * 0.52, 0, Math.PI * 2);
+    g.fill();
+    g.beginPath();
+    g.moveTo(0, -size * 0.55);
+    g.lineTo(0, size * 0.55);
+    g.moveTo(-size * 0.65, -size * 0.1);
+    g.lineTo(size * 0.65, -size * 0.1);
+    g.moveTo(0, size * 0.52);
+    g.lineTo(-size * 0.55, size * 1.08);
+    g.moveTo(0, size * 0.52);
+    g.lineTo(size * 0.55, size * 1.08);
+    g.stroke();
+    return;
+  }
+  const bodyWidth = role === "catgirl" ? size * 1.45 : size * 2;
+  g.fillStyle = bodyColor;
+  spriteRounded(g, -bodyWidth / 2, -size * 0.75, bodyWidth, size * 1.65, 12);
+  g.fill();
+  g.strokeStyle = stroke;
+  g.lineWidth = 3;
+  g.stroke();
+  g.fillStyle = skin;
+  g.beginPath();
+  g.arc(0, -size * 0.98, size * 0.55, 0, Math.PI * 2);
+  g.fill();
+  g.fillStyle = dark;
+  g.beginPath();
+  g.arc(-size * 0.18, -size * 1.02, 2.2, 0, Math.PI * 2);
+  g.arc(size * 0.2, -size * 1.02, 2.2, 0, Math.PI * 2);
+  g.fill();
+  if (role === "catgirl") {
+    g.fillStyle = "#111111";
+    g.beginPath();
+    g.moveTo(-size * 0.32, -size * 1.42);
+    g.lineTo(-size * 0.72, -size * 1.82);
+    g.lineTo(-size * 0.02, -size * 1.56);
+    g.moveTo(size * 0.32, -size * 1.42);
+    g.lineTo(size * 0.72, -size * 1.82);
+    g.lineTo(size * 0.02, -size * 1.56);
+    g.fill();
+    g.strokeStyle = "#111111";
+    g.lineWidth = 5;
+    g.beginPath();
+    g.moveTo(size * 0.72, size * 0.2);
+    g.quadraticCurveTo(size * 1.45, size * 0.35, size * 1.15, size * 1.1);
+    g.stroke();
+  } else if (role === "mage") {
+    g.fillStyle = "#5a3ac8";
+    g.beginPath();
+    g.moveTo(-size * 0.75, -size * 1.28);
+    g.lineTo(0, -size * 2.0);
+    g.lineTo(size * 0.75, -size * 1.28);
+    g.closePath();
+    g.fill();
+  } else if (role === "necromancer") {
+    g.fillStyle = "#2b1b4b";
+    g.beginPath();
+    g.moveTo(-size * 0.7, -size * 1.25);
+    g.lineTo(0, -size * 1.95);
+    g.lineTo(size * 0.7, -size * 1.25);
+    g.closePath();
+    g.fill();
+  } else if (role === "tank") {
+    g.fillStyle = "#d8e0d8";
+    spriteRounded(g, -size * 0.62, -size * 1.42, size * 1.24, size * 0.44, 8);
+    g.fill();
+  } else if (role === "priest") {
+    g.fillStyle = "#fff0bd";
+    g.beginPath();
+    g.arc(size * 0.5, -size * 1.28, size * 0.18, 0, Math.PI * 2);
+    g.fill();
+  }
+  g.strokeStyle = role === "ranger" ? "#4b301d" : role === "priest" ? "#fff0bd" : "#f8f1dd";
+  g.lineWidth = role === "ranger" ? 4 : 6;
+  g.beginPath();
+  if (role === "ranger") {
+    g.arc(size * 0.92, -size * 0.12, size * 0.58, -1.2, 1.2);
+  } else {
+    g.moveTo(size * 0.62, -size * 0.25);
+    g.lineTo(size * 1.18, -size * 1.05);
+  }
+  g.stroke();
+  g.fillStyle = "#4b301d";
+  g.fillRect(-size * 0.62, size * 0.9, size * 0.42, 12);
+  g.fillRect(size * 0.2, size * 0.9, size * 0.42, 12);
+}
+
+function drawUnitStatusOverlays(unit) {
+  if (unit.haste > 0) {
+    ctx.strokeStyle = palette.gold;
+    ctx.lineWidth = 4;
+    ctx.beginPath();
+    ctx.arc(0, 0, unit.size + 10, 0, Math.PI * 2);
+    ctx.stroke();
+  }
+  if (unit.slow > 0) {
+    ctx.strokeStyle = palette.ice;
+    ctx.lineWidth = 3;
+    ctx.beginPath();
+    ctx.arc(0, unit.size * 0.2, unit.size + 8, 0, Math.PI * 2);
+    ctx.stroke();
+  }
+  if (unit.shield > 0) {
+    ctx.strokeStyle = "rgba(255,248,223,0.86)";
+    ctx.lineWidth = 4;
+    ctx.beginPath();
+    ctx.arc(0, -2, unit.size + 15, 0, Math.PI * 2);
+    ctx.stroke();
+  }
+  if (hasCatgirlAura(unit) || unit.role === "catgirl") {
+    ctx.strokeStyle = "#ff9bd5";
+    ctx.lineWidth = unit.role === "catgirl" ? 4 : 2;
+    ctx.beginPath();
+    ctx.arc(0, unit.size * 0.2, unit.size + (unit.role === "catgirl" ? 18 : 11), 0, Math.PI * 2);
+    ctx.stroke();
+  }
+  if (unit.stun > 0) {
+    ctx.fillStyle = "#ff9bd5";
+    for (let i = 0; i < 3; i += 1) {
+      const a = unit.walk * 0.5 + i * 2.1;
+      ctx.beginPath();
+      ctx.arc(Math.cos(a) * (unit.size + 12), -unit.size * 1.55 + Math.sin(a) * 5, 4, 0, Math.PI * 2);
+      ctx.fill();
+    }
+  }
+  if (unit.burn > 0) {
+    ctx.fillStyle = "#ff774d";
+    ctx.beginPath();
+    ctx.arc(unit.size * 0.52, -unit.size * 1.35, 5 + Math.sin(unit.walk) * 2, 0, Math.PI * 2);
+    ctx.fill();
+  }
+  if (unit.regen > 0) {
+    ctx.strokeStyle = palette.green;
+    ctx.lineWidth = 3;
+    ctx.beginPath();
+    ctx.arc(0, -unit.size * 0.4, unit.size + 12 + Math.sin(unit.walk) * 2, 0, Math.PI * 2);
+    ctx.stroke();
+  }
+  if (unit.freeze > 0) {
+    ctx.strokeStyle = palette.ice;
+    ctx.lineWidth = 4;
+    ctx.strokeRect(-unit.size - 5, -unit.size - 12, unit.size * 2 + 10, unit.size * 2 + 18);
+  }
+}
+
+function spriteRounded(g, x, y, width, height, radius) {
+  const r = Math.min(radius, width / 2, height / 2);
+  g.beginPath();
+  g.moveTo(x + r, y);
+  g.arcTo(x + width, y, x + width, y + height, r);
+  g.arcTo(x + width, y + height, x, y + height, r);
+  g.arcTo(x, y + height, x, y, r);
+  g.arcTo(x, y, x + width, y, r);
+  g.closePath();
+}
+
 function miniBar(x, y, width, height, value, color) {
   ctx.fillStyle = "rgba(7,10,18,0.72)";
   rounded(x, y, width, height, height / 2);
@@ -3311,7 +3579,11 @@ function sound(type) {
   });
 }
 
-function updateUi() {
+function updateUi(force = false) {
+  const now = performance.now();
+  const interval = isLowPowerMode() ? 140 : 80;
+  if (!force && now - (updateUi.lastUpdate || 0) < interval) return;
+  updateUi.lastUpdate = now;
   const energy = Math.floor(state.energy);
   energyText.textContent = `${energy} / 10`;
   energyFill.style.width = `${Math.max(0, Math.min(100, state.energy * 10))}%`;
@@ -3347,7 +3619,8 @@ function loop(time) {
     requestAnimationFrame(loop);
     return;
   }
-  const dt = state.lastTime ? Math.min(0.04, (time - state.lastTime) / 1000) : 0;
+  const maxDt = isLowPowerMode() ? 0.12 : 0.04;
+  const dt = state.lastTime ? Math.min(maxDt, (time - state.lastTime) / 1000) : 0;
   state.lastTime = time;
   update(dt);
   draw();
