@@ -37,6 +37,7 @@ const laneButtons = [...document.querySelectorAll(".lane-tabs button")];
 
 const W = canvas.width;
 const H = canvas.height;
+const LOW_POWER_VIEW = window.matchMedia?.("(max-width: 700px)")?.matches || false;
 const SAVE_KEY = "iron-clash-legends-save-v1";
 const RESET_PROGRESS_KEY = "iron-clash-legends-progress-reset-2026-05-27";
 const STARTER_CARDS = ["tank", "ranger", "swordsman", "mage", "catgirl", "fireball", "freeze", "heal", "haste"];
@@ -2136,7 +2137,8 @@ function drawBush(x, y, scale = 1) {
 function drawGrass() {
   ctx.save();
   ctx.globalAlpha = 0.32;
-  for (let i = 0; i < 190; i += 1) {
+  const grassCount = LOW_POWER_VIEW ? 82 : 190;
+  for (let i = 0; i < grassCount; i += 1) {
     const x = (i * 97) % W;
     const y = (i * 53) % H;
     ctx.strokeStyle = i % 2 ? "#b7e17d" : "#346f40";
@@ -3088,36 +3090,43 @@ function shadeColor(hex, amount) {
 }
 
 function burst(x, y, color, radius) {
+  if (LOW_POWER_VIEW && state.effects.length > 34) return;
   state.effects.push({ type: "burst", x, y, color, radius, life: 0.5, maxLife: 0.5 });
 }
 
 function ripple(x, y, color, radius) {
+  if (LOW_POWER_VIEW && state.effects.length > 34) return;
   state.effects.push({ type: "ripple", x, y, color, radius, life: 0.45, maxLife: 0.45 });
 }
 
 function sparks(x, y, count) {
-  state.effects.push({ type: "spark", x, y, count, seed: Math.random() * 6, life: 0.34, maxLife: 0.34 });
+  if (LOW_POWER_VIEW && state.effects.length > 34) return;
+  state.effects.push({ type: "spark", x, y, count: LOW_POWER_VIEW ? Math.min(count, 6) : count, seed: Math.random() * 6, life: 0.34, maxLife: 0.34 });
 }
 
 function hitFlash(x, y, color, radius) {
+  if (LOW_POWER_VIEW && state.effects.length > 34) return;
   state.effects.push({ type: "hit", x, y, color, radius, life: 0.22, maxLife: 0.22 });
 }
 
 function deathPoof(x, y, color) {
-  state.effects.push({ type: "death", x, y, color, count: 12, seed: Math.random() * 6, life: 0.5, maxLife: 0.5 });
+  if (LOW_POWER_VIEW && state.effects.length > 34) return;
+  state.effects.push({ type: "death", x, y, color, count: LOW_POWER_VIEW ? 7 : 12, seed: Math.random() * 6, life: 0.5, maxLife: 0.5 });
 }
 
 function screenShake(amount) {
-  state.shake = Math.max(state.shake, amount);
+  state.shake = Math.max(state.shake, LOW_POWER_VIEW ? amount * 0.55 : amount);
   state.hitStop = Math.max(state.hitStop, Math.min(0.045, amount / 240));
 }
 
 function ember(x, y, count) {
-  state.effects.push({ type: "ember", x, y, count, seed: Math.random() * 6, life: 0.7, maxLife: 0.7 });
+  if (LOW_POWER_VIEW && state.effects.length > 34) return;
+  state.effects.push({ type: "ember", x, y, count: LOW_POWER_VIEW ? Math.min(count, 7) : count, seed: Math.random() * 6, life: 0.7, maxLife: 0.7 });
 }
 
 function frost(x, y, count) {
-  state.effects.push({ type: "frost", x, y, count, seed: Math.random() * 6, life: 0.62, maxLife: 0.62 });
+  if (LOW_POWER_VIEW && state.effects.length > 34) return;
+  state.effects.push({ type: "frost", x, y, count: LOW_POWER_VIEW ? Math.min(count, 7) : count, seed: Math.random() * 6, life: 0.62, maxLife: 0.62 });
 }
 
 function soul(x, y, color) {
