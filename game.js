@@ -44,6 +44,9 @@ function syncMobileViewClass() {
 }
 syncMobileViewClass();
 window.addEventListener("resize", syncMobileViewClass);
+function isLowPowerMode() {
+  return LOW_POWER_VIEW || document.documentElement.classList.contains("mobile-view") || Boolean(window.matchMedia?.("(pointer: coarse) and (orientation: portrait)")?.matches);
+}
 const SAVE_KEY = "iron-clash-legends-save-v1";
 const RESET_PROGRESS_KEY = "iron-clash-legends-progress-reset-2026-05-27";
 const STARTER_CARDS = ["tank", "ranger", "swordsman", "mage", "catgirl", "fireball", "freeze", "heal", "haste"];
@@ -1956,16 +1959,20 @@ function draw() {
 }
 
 function drawArena() {
-  const bg = ctx.createLinearGradient(0, 0, 0, H);
-  bg.addColorStop(0, "#2f9860");
-  bg.addColorStop(0.18, "#72c947");
-  bg.addColorStop(0.5, "#65b943");
-  bg.addColorStop(0.82, "#79c957");
-  bg.addColorStop(1, "#248b58");
-  ctx.fillStyle = bg;
+  if (isLowPowerMode()) {
+    ctx.fillStyle = "#62bd48";
+  } else {
+    const bg = ctx.createLinearGradient(0, 0, 0, H);
+    bg.addColorStop(0, "#2f9860");
+    bg.addColorStop(0.18, "#72c947");
+    bg.addColorStop(0.5, "#65b943");
+    bg.addColorStop(0.82, "#79c957");
+    bg.addColorStop(1, "#248b58");
+    ctx.fillStyle = bg;
+  }
   ctx.fillRect(0, 0, W, H);
 
-  drawBackdropDetails();
+  if (!isLowPowerMode()) drawBackdropDetails();
   drawGrass();
 
   const topY = ROAD_TOP_Y;
@@ -1984,14 +1991,27 @@ function drawArena() {
     ctx.stroke();
   });
 
-  drawLaneLabels(topY, bottomY);
-  drawBanners();
+  if (!isLowPowerMode()) {
+    drawLaneLabels(topY, bottomY);
+    drawBanners();
+  }
 }
 
 function drawRoadPath(points, width, radius = 86) {
   ctx.save();
   ctx.lineCap = "round";
   ctx.lineJoin = "round";
+  if (isLowPowerMode()) {
+    [["#9a7230", width + 8], ["#f3cb65", width - 4]].forEach(([color, lineWidth]) => {
+      ctx.strokeStyle = color;
+      ctx.lineWidth = lineWidth;
+      ctx.beginPath();
+      drawRoundedPolyline(points, radius);
+      ctx.stroke();
+    });
+    ctx.restore();
+    return;
+  }
   [["#806326", width + 18], ["#bd8a35", width + 8], ["#f3cb65", width], ["#f8db80", width - 18]].forEach(([color, lineWidth]) => {
     ctx.strokeStyle = color;
     ctx.lineWidth = lineWidth;
@@ -2143,7 +2163,7 @@ function drawBush(x, y, scale = 1) {
 function drawGrass() {
   ctx.save();
   ctx.globalAlpha = 0.32;
-  const grassCount = LOW_POWER_VIEW ? 82 : 190;
+  const grassCount = isLowPowerMode() ? 34 : 190;
   for (let i = 0; i < grassCount; i += 1) {
     const x = (i * 97) % W;
     const y = (i * 53) % H;
@@ -2186,10 +2206,25 @@ function drawBases() {
 
 function drawEndlessPortal(x, y) {
   ctx.save();
+  if (isLowPowerMode()) {
+    ctx.fillStyle = "rgba(189,131,255,0.45)";
+    ctx.beginPath();
+    ctx.ellipse(x, y + 8, 82, 30, 0, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.fillStyle = "#24132e";
+    ctx.beginPath();
+    ctx.ellipse(x, y, 48, 18, 0, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.strokeStyle = "#ff5c5c";
+    ctx.lineWidth = 5;
+    ctx.stroke();
+    ctx.restore();
+    return;
+  }
   const time = performance.now() / 1000;
   const pulse = 1 + Math.sin(time * 4) * 0.08;
   ctx.shadowColor = "rgba(189,131,255,0.8)";
-  ctx.shadowBlur = 24;
+  ctx.shadowBlur = isLowPowerMode() ? 0 : 24;
   const outer = ctx.createRadialGradient(x, y, 16, x, y, 96);
   outer.addColorStop(0, "rgba(255,92,92,0.76)");
   outer.addColorStop(0.5, "rgba(189,131,255,0.38)");
@@ -2243,7 +2278,7 @@ function drawLaneHighlights() {
   ctx.lineCap = "round";
   ctx.lineJoin = "round";
   ctx.shadowColor = card?.tone || palette.gold;
-  ctx.shadowBlur = 16;
+  ctx.shadowBlur = isLowPowerMode() ? 0 : 16;
   ctx.beginPath();
   path.forEach((point, index) => {
     if (index === 0) ctx.moveTo(point.x, point.y);
@@ -2256,7 +2291,7 @@ function drawLaneHighlights() {
 function base(x, y, color, hp, maxHp, label) {
   ctx.save();
   ctx.shadowColor = "rgba(46, 31, 21, 0.34)";
-  ctx.shadowBlur = 18;
+  ctx.shadowBlur = isLowPowerMode() ? 0 : 18;
   ctx.fillStyle = "rgba(54,34,21,0.22)";
   ctx.beginPath();
   ctx.ellipse(x, y + 82, 86, 24, 0, 0, Math.PI * 2);
@@ -2363,7 +2398,7 @@ function drawUnit(unit) {
   ctx.scale(unit.team === "player" ? 1 : -1, 1);
 
   ctx.shadowColor = unit.flash > 0 ? palette.gold : "rgba(59,37,22,0.45)";
-  ctx.shadowBlur = unit.flash > 0 ? 20 : 8;
+  ctx.shadowBlur = isLowPowerMode() ? 0 : unit.flash > 0 ? 20 : 8;
   ctx.fillStyle = "rgba(54,34,21,0.24)";
   ctx.beginPath();
   ctx.ellipse(0, unit.size + (unit.flying ? 46 : 14), unit.size * (unit.flying ? 1.7 : 1.2), unit.flying ? 12 : 9, 0, 0, Math.PI * 2);
@@ -2383,11 +2418,15 @@ function drawUnit(unit) {
   } else {
     const bodyWidth = unit.role === "catgirl" ? unit.size * 1.45 : unit.size * 2;
     const bodyX = -bodyWidth / 2;
-    const bodyGrad = ctx.createLinearGradient(-unit.size, -unit.size, unit.size, unit.size);
-    bodyGrad.addColorStop(0, unit.freeze > 0 ? "#d9fbff" : "#fff0bd");
-    bodyGrad.addColorStop(0.18, unit.freeze > 0 ? palette.ice : bodyColor);
-    bodyGrad.addColorStop(1, shadeColor(unit.freeze > 0 ? palette.ice : bodyColor, -28));
-    ctx.fillStyle = bodyGrad;
+    if (isLowPowerMode()) {
+      ctx.fillStyle = unit.freeze > 0 ? palette.ice : bodyColor;
+    } else {
+      const bodyGrad = ctx.createLinearGradient(-unit.size, -unit.size, unit.size, unit.size);
+      bodyGrad.addColorStop(0, unit.freeze > 0 ? "#d9fbff" : "#fff0bd");
+      bodyGrad.addColorStop(0.18, unit.freeze > 0 ? palette.ice : bodyColor);
+      bodyGrad.addColorStop(1, shadeColor(unit.freeze > 0 ? palette.ice : bodyColor, -28));
+      ctx.fillStyle = bodyGrad;
+    }
     rounded(bodyX, -unit.size * 0.75, bodyWidth, unit.size * 1.65, 12);
     ctx.fill();
     ctx.strokeStyle = "rgba(54,34,21,0.35)";
@@ -2395,10 +2434,14 @@ function drawUnit(unit) {
     ctx.stroke();
 
     ctx.shadowBlur = 0;
-    const skin = ctx.createRadialGradient(-4, -unit.size * 1.08, 2, 0, -unit.size, unit.size * 0.7);
-    skin.addColorStop(0, "#fff0bd");
-    skin.addColorStop(1, "#f0b879");
-    ctx.fillStyle = skin;
+    if (isLowPowerMode()) {
+      ctx.fillStyle = "#f0b879";
+    } else {
+      const skin = ctx.createRadialGradient(-4, -unit.size * 1.08, 2, 0, -unit.size, unit.size * 0.7);
+      skin.addColorStop(0, "#fff0bd");
+      skin.addColorStop(1, "#f0b879");
+      ctx.fillStyle = skin;
+    }
     ctx.beginPath();
     ctx.arc(0, -unit.size * 0.98, unit.size * 0.55, 0, Math.PI * 2);
     ctx.fill();
@@ -2799,7 +2842,7 @@ function drawProjectile(projectile) {
   }
   ctx.fillStyle = projectile.color;
   ctx.shadowColor = projectile.color;
-  ctx.shadowBlur = 16;
+  ctx.shadowBlur = isLowPowerMode() ? 0 : 16;
   ctx.beginPath();
   ctx.arc(projectile.x, projectile.y, projectile.siege ? 13 : projectile.splash ? 9 : 6, 0, Math.PI * 2);
   ctx.fill();
@@ -2821,7 +2864,7 @@ function drawTowerShot(shot) {
   ctx.stroke();
   ctx.fillStyle = shot.color;
   ctx.shadowColor = shot.color;
-  ctx.shadowBlur = 18;
+  ctx.shadowBlur = isLowPowerMode() ? 0 : 18;
   ctx.beginPath();
   ctx.arc(shot.x, shot.y, 8, 0, Math.PI * 2);
   ctx.fill();
@@ -2863,7 +2906,7 @@ function drawEffect(effect) {
   if (effect.type === "hit") {
     ctx.fillStyle = effect.color;
     ctx.shadowColor = effect.color;
-    ctx.shadowBlur = 16;
+    ctx.shadowBlur = isLowPowerMode() ? 0 : 16;
     ctx.beginPath();
     ctx.arc(effect.x, effect.y, effect.radius * t, 0, Math.PI * 2);
     ctx.fill();
@@ -2945,7 +2988,7 @@ function drawEffect(effect) {
   if (effect.type === "charm") {
     ctx.fillStyle = effect.color;
     ctx.shadowColor = effect.color;
-    ctx.shadowBlur = 12;
+    ctx.shadowBlur = isLowPowerMode() ? 0 : 12;
     const s = 16 * (1.05 - t * 0.2);
     ctx.beginPath();
     ctx.moveTo(effect.x, effect.y - s * 0.25 - (1 - t) * 28);
@@ -2980,7 +3023,7 @@ function drawEffect(effect) {
   }
   if (effect.type === "bolt") {
     ctx.shadowColor = "#f8f1dd";
-    ctx.shadowBlur = 18;
+    ctx.shadowBlur = isLowPowerMode() ? 0 : 18;
     ctx.strokeStyle = "#f8f1dd";
     ctx.lineWidth = 7;
     ctx.beginPath();
@@ -3096,66 +3139,72 @@ function shadeColor(hex, amount) {
 }
 
 function burst(x, y, color, radius) {
-  if (LOW_POWER_VIEW && state.effects.length > 34) return;
+  if (isLowPowerMode() && state.effects.length > 18) return;
   state.effects.push({ type: "burst", x, y, color, radius, life: 0.5, maxLife: 0.5 });
 }
 
 function ripple(x, y, color, radius) {
-  if (LOW_POWER_VIEW && state.effects.length > 34) return;
+  if (isLowPowerMode() && state.effects.length > 18) return;
   state.effects.push({ type: "ripple", x, y, color, radius, life: 0.45, maxLife: 0.45 });
 }
 
 function sparks(x, y, count) {
-  if (LOW_POWER_VIEW && state.effects.length > 34) return;
-  state.effects.push({ type: "spark", x, y, count: LOW_POWER_VIEW ? Math.min(count, 6) : count, seed: Math.random() * 6, life: 0.34, maxLife: 0.34 });
+  if (isLowPowerMode() && state.effects.length > 18) return;
+  state.effects.push({ type: "spark", x, y, count: isLowPowerMode() ? Math.min(count, 6) : count, seed: Math.random() * 6, life: 0.34, maxLife: 0.34 });
 }
 
 function hitFlash(x, y, color, radius) {
-  if (LOW_POWER_VIEW && state.effects.length > 34) return;
+  if (isLowPowerMode() && state.effects.length > 18) return;
   state.effects.push({ type: "hit", x, y, color, radius, life: 0.22, maxLife: 0.22 });
 }
 
 function deathPoof(x, y, color) {
-  if (LOW_POWER_VIEW && state.effects.length > 34) return;
-  state.effects.push({ type: "death", x, y, color, count: LOW_POWER_VIEW ? 7 : 12, seed: Math.random() * 6, life: 0.5, maxLife: 0.5 });
+  if (isLowPowerMode() && state.effects.length > 18) return;
+  state.effects.push({ type: "death", x, y, color, count: isLowPowerMode() ? 7 : 12, seed: Math.random() * 6, life: 0.5, maxLife: 0.5 });
 }
 
 function screenShake(amount) {
-  state.shake = Math.max(state.shake, LOW_POWER_VIEW ? amount * 0.55 : amount);
+  state.shake = Math.max(state.shake, isLowPowerMode() ? amount * 0.55 : amount);
   state.hitStop = Math.max(state.hitStop, Math.min(0.045, amount / 240));
 }
 
 function ember(x, y, count) {
-  if (LOW_POWER_VIEW && state.effects.length > 34) return;
-  state.effects.push({ type: "ember", x, y, count: LOW_POWER_VIEW ? Math.min(count, 7) : count, seed: Math.random() * 6, life: 0.7, maxLife: 0.7 });
+  if (isLowPowerMode() && state.effects.length > 18) return;
+  state.effects.push({ type: "ember", x, y, count: isLowPowerMode() ? Math.min(count, 7) : count, seed: Math.random() * 6, life: 0.7, maxLife: 0.7 });
 }
 
 function frost(x, y, count) {
-  if (LOW_POWER_VIEW && state.effects.length > 34) return;
-  state.effects.push({ type: "frost", x, y, count: LOW_POWER_VIEW ? Math.min(count, 7) : count, seed: Math.random() * 6, life: 0.62, maxLife: 0.62 });
+  if (isLowPowerMode() && state.effects.length > 18) return;
+  state.effects.push({ type: "frost", x, y, count: isLowPowerMode() ? Math.min(count, 7) : count, seed: Math.random() * 6, life: 0.62, maxLife: 0.62 });
 }
 
 function soul(x, y, color) {
+  if (isLowPowerMode() && state.effects.length > 18) return;
   state.effects.push({ type: "soul", x, y, color, life: 0.62, maxLife: 0.62 });
 }
 
 function beam(x1, y1, x2, y2, color) {
+  if (isLowPowerMode() && state.effects.length > 18) return;
   state.effects.push({ type: "beam", x1, y1, x2, y2, color, life: 0.34, maxLife: 0.34 });
 }
 
 function auraPulse(x, y, color) {
+  if (isLowPowerMode() && state.effects.length > 18) return;
   state.effects.push({ type: "aura", x, y, color, radius: 135, life: 0.55, maxLife: 0.55 });
 }
 
 function charm(x, y) {
+  if (isLowPowerMode() && state.effects.length > 18) return;
   state.effects.push({ type: "charm", x, y, color: "#ff9bd5", life: 0.7, maxLife: 0.7 });
 }
 
 function slash(x, y, color) {
+  if (isLowPowerMode() && state.effects.length > 18) return;
   state.effects.push({ type: "slash", x, y, color, life: 0.28, maxLife: 0.28 });
 }
 
 function bolt(x, y) {
+  if (isLowPowerMode() && state.effects.length > 18) return;
   state.effects.push({ type: "bolt", x, y, life: 0.34, maxLife: 0.34 });
 }
 
@@ -3253,6 +3302,10 @@ function updateUi() {
 }
 
 function loop(time) {
+  if (isLowPowerMode() && state.lastTime && time - state.lastTime < 32) {
+    requestAnimationFrame(loop);
+    return;
+  }
   const dt = state.lastTime ? Math.min(0.04, (time - state.lastTime) / 1000) : 0;
   state.lastTime = time;
   update(dt);
@@ -3357,3 +3410,4 @@ renderDifficulty();
 renderCampaignMap();
 window.IronClashPlatform?.ready();
 requestAnimationFrame(loop);
+
