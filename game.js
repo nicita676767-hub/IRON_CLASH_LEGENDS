@@ -50,7 +50,7 @@ function isLowPowerMode() {
   return LOW_POWER_VIEW || document.documentElement.classList.contains("mobile-view") || Boolean(window.matchMedia?.("(pointer: coarse) and (orientation: portrait)")?.matches);
 }
 function renderScale() {
-  return isLowPowerMode() ? 0.72 : 1;
+  return isLowPowerMode() ? 0.62 : 1;
 }
 
 function applyRenderScale() {
@@ -2006,7 +2006,8 @@ function draw() {
   state.units.sort((a, b) => a.y - b.y || a.x - b.x).forEach(drawUnit);
   state.projectiles.forEach(drawProjectile);
   state.towerShots.forEach(drawTowerShot);
-  state.effects.forEach(drawEffect);
+  const visibleEffects = isLowPowerMode() ? state.effects.slice(-10) : state.effects;
+  visibleEffects.forEach(drawEffect);
   drawAimingReticle();
   if (!state.started) drawAttract();
   ctx.restore();
@@ -3447,28 +3448,32 @@ function shadeColor(hex, amount) {
   return `rgb(${r}, ${g}, ${b})`;
 }
 
+function canAddEffect() {
+  return !isLowPowerMode() || state.effects.length < 10;
+}
+
 function burst(x, y, color, radius) {
-  if (isLowPowerMode() && state.effects.length > 18) return;
+  if (!canAddEffect()) return;
   state.effects.push({ type: "burst", x, y, color, radius, life: 0.5, maxLife: 0.5 });
 }
 
 function ripple(x, y, color, radius) {
-  if (isLowPowerMode() && state.effects.length > 18) return;
+  if (!canAddEffect()) return;
   state.effects.push({ type: "ripple", x, y, color, radius, life: 0.45, maxLife: 0.45 });
 }
 
 function sparks(x, y, count) {
-  if (isLowPowerMode() && state.effects.length > 18) return;
+  if (!canAddEffect()) return;
   state.effects.push({ type: "spark", x, y, count: isLowPowerMode() ? Math.min(count, 6) : count, seed: Math.random() * 6, life: 0.34, maxLife: 0.34 });
 }
 
 function hitFlash(x, y, color, radius) {
-  if (isLowPowerMode() && state.effects.length > 18) return;
+  if (!canAddEffect()) return;
   state.effects.push({ type: "hit", x, y, color, radius, life: 0.22, maxLife: 0.22 });
 }
 
 function deathPoof(x, y, color) {
-  if (isLowPowerMode() && state.effects.length > 18) return;
+  if (!canAddEffect()) return;
   state.effects.push({ type: "death", x, y, color, count: isLowPowerMode() ? 7 : 12, seed: Math.random() * 6, life: 0.5, maxLife: 0.5 });
 }
 
@@ -3478,42 +3483,42 @@ function screenShake(amount) {
 }
 
 function ember(x, y, count) {
-  if (isLowPowerMode() && state.effects.length > 18) return;
+  if (!canAddEffect()) return;
   state.effects.push({ type: "ember", x, y, count: isLowPowerMode() ? Math.min(count, 7) : count, seed: Math.random() * 6, life: 0.7, maxLife: 0.7 });
 }
 
 function frost(x, y, count) {
-  if (isLowPowerMode() && state.effects.length > 18) return;
+  if (!canAddEffect()) return;
   state.effects.push({ type: "frost", x, y, count: isLowPowerMode() ? Math.min(count, 7) : count, seed: Math.random() * 6, life: 0.62, maxLife: 0.62 });
 }
 
 function soul(x, y, color) {
-  if (isLowPowerMode() && state.effects.length > 18) return;
+  if (!canAddEffect()) return;
   state.effects.push({ type: "soul", x, y, color, life: 0.62, maxLife: 0.62 });
 }
 
 function beam(x1, y1, x2, y2, color) {
-  if (isLowPowerMode() && state.effects.length > 18) return;
+  if (!canAddEffect()) return;
   state.effects.push({ type: "beam", x1, y1, x2, y2, color, life: 0.34, maxLife: 0.34 });
 }
 
 function auraPulse(x, y, color) {
-  if (isLowPowerMode() && state.effects.length > 18) return;
+  if (!canAddEffect()) return;
   state.effects.push({ type: "aura", x, y, color, radius: 135, life: 0.55, maxLife: 0.55 });
 }
 
 function charm(x, y) {
-  if (isLowPowerMode() && state.effects.length > 18) return;
+  if (!canAddEffect()) return;
   state.effects.push({ type: "charm", x, y, color: "#ff9bd5", life: 0.7, maxLife: 0.7 });
 }
 
 function slash(x, y, color) {
-  if (isLowPowerMode() && state.effects.length > 18) return;
+  if (!canAddEffect()) return;
   state.effects.push({ type: "slash", x, y, color, life: 0.28, maxLife: 0.28 });
 }
 
 function bolt(x, y) {
-  if (isLowPowerMode() && state.effects.length > 18) return;
+  if (!canAddEffect()) return;
   state.effects.push({ type: "bolt", x, y, life: 0.34, maxLife: 0.34 });
 }
 
@@ -3615,10 +3620,6 @@ function updateUi(force = false) {
 }
 
 function loop(time) {
-  if (isLowPowerMode() && state.lastTime && time - state.lastTime < 20) {
-    requestAnimationFrame(loop);
-    return;
-  }
   const maxDt = isLowPowerMode() ? 0.12 : 0.04;
   const dt = state.lastTime ? Math.min(maxDt, (time - state.lastTime) / 1000) : 0;
   state.lastTime = time;
