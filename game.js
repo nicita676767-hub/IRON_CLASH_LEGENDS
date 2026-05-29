@@ -29,6 +29,7 @@ const campaignMap = document.querySelector("#campaignMap");
 const campaignBackBtn = document.querySelector("#campaignBackBtn");
 const soundToggle = document.querySelector("#soundToggle");
 const graphicsToggle = document.querySelector("#graphicsToggle");
+const graphicsFloatToggle = document.querySelector("#graphicsFloatToggle");
 const toastEl = document.querySelector("#toast");
 const perfPanel = document.querySelector("#perfPanel");
 const resultPanel = document.querySelector("#resultPanel");
@@ -915,11 +916,20 @@ function renderProgress() {
 }
 
 function renderGraphicsToggle() {
-  if (!graphicsToggle) return;
-  graphicsToggle.textContent = state.lowGraphics ? "Графика: быстро" : "Графика: красиво";
+  const fullLabel = state.lowGraphics ? "Графика: быстро" : "Графика: красиво";
+  const shortLabel = state.lowGraphics ? "Быстро" : "Красиво";
+  if (graphicsToggle) graphicsToggle.textContent = fullLabel;
+  if (graphicsFloatToggle) graphicsFloatToggle.textContent = shortLabel;
   document.documentElement.classList.toggle("low-graphics", state.lowGraphics);
   document.documentElement.classList.toggle("pretty-graphics", !state.lowGraphics);
   invalidateArenaCache();
+}
+
+function toggleGraphicsMode() {
+  state.lowGraphics = !state.lowGraphics;
+  renderGraphicsToggle();
+  saveSettings();
+  sound("select");
 }
 
 function todayKey() {
@@ -4039,13 +4049,8 @@ soundToggle.addEventListener("click", () => {
   saveSettings();
   if (state.soundOn) sound("select");
 });
-graphicsToggle?.addEventListener("click", () => {
-  state.lowGraphics = !state.lowGraphics;
-  renderGraphicsToggle();
-  invalidateArenaCache();
-  saveSettings();
-  sound("select");
-});
+graphicsToggle?.addEventListener("click", toggleGraphicsMode);
+graphicsFloatToggle?.addEventListener("click", toggleGraphicsMode);
 dailyBonusBtn?.addEventListener("click", claimDailyBonus);
 
 loadSave();

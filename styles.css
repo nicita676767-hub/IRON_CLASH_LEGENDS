@@ -2027,10 +2027,10 @@ html.mobile-view.pretty-graphics .lane-tabs {
 }
 
 .perf-panel {
-  position: absolute;
+  position: fixed;
   right: 10px;
-  top: 10px;
-  z-index: 12;
+  top: 76px;
+  z-index: 9998;
   display: grid;
   gap: 2px;
   min-width: 150px;
@@ -2043,6 +2043,26 @@ html.mobile-view.pretty-graphics .lane-tabs {
   pointer-events: none;
 }
 
+.graphics-float {
+  position: fixed;
+  right: 10px;
+  top: 166px;
+  z-index: 9999;
+  min-width: 86px;
+  min-height: 34px;
+  padding: 0 12px;
+  border: 1px solid rgba(255, 248, 223, 0.4);
+  border-radius: 8px;
+  background: linear-gradient(180deg, #ffdf78, #efb94f);
+  color: #432818;
+  font: 950 12px/1 "Segoe UI", system-ui, sans-serif;
+  box-shadow: 0 8px 16px rgba(18, 31, 28, 0.22);
+}
+
+.graphics-float:active {
+  transform: translateY(1px) scale(0.98);
+}
+
 .perf-panel b {
   color: #fff8df;
   font-size: 13px;
@@ -2053,10 +2073,31 @@ html.mobile-view.pretty-graphics .lane-tabs {
 }
 
 html.mobile-view .perf-panel {
-  right: 7px;
-  top: 58px;
-  min-width: 126px;
-  padding: 5px 6px;
-  font-size: 9px;
-  opacity: 0.82;
+  position: fixed;
+  right: 6px;
+  top: 64px;
+  z-index: 9998;
+  min-width: 132px;
+  max-width: 48vw;
+  padding: 6px 7px;
+  border-color: rgba(217, 251, 255, 0.45);
+  background: rgba(8, 22, 20, 0.9);
+  font-size: 10px;
+  opacity: 0.96;
+}
+
+html.mobile-view .perf-panel b {
+  font-size: 12px;
+}
+
+html.mobile-view .graphics-float {
+  position: fixed;
+  right: 8px;
+  bottom: 122px;
+  z-index: 9999;
+  min-width: 82px;
+  min-height: 38px;
+  padding: 0 10px;
+  border-radius: 10px;
+  font-size: 11px;
 }
