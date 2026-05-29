@@ -28,7 +28,9 @@ const campaignPanel = document.querySelector("#campaignPanel");
 const campaignMap = document.querySelector("#campaignMap");
 const campaignBackBtn = document.querySelector("#campaignBackBtn");
 const soundToggle = document.querySelector("#soundToggle");
+const graphicsToggle = document.querySelector("#graphicsToggle");
 const toastEl = document.querySelector("#toast");
+const perfPanel = document.querySelector("#perfPanel");
 const resultPanel = document.querySelector("#resultPanel");
 const resultTitle = document.querySelector("#resultTitle");
 const resultCopy = document.querySelector("#resultCopy");
@@ -47,10 +49,11 @@ function syncMobileViewClass() {
 syncMobileViewClass();
 window.addEventListener("resize", syncMobileViewClass);
 function isLowPowerMode() {
-  return LOW_POWER_VIEW || document.documentElement.classList.contains("mobile-view") || Boolean(window.matchMedia?.("(pointer: coarse) and (orientation: portrait)")?.matches);
+  return document.documentElement.classList.contains("low-graphics");
 }
 function renderScale() {
-  return isLowPowerMode() ? 0.62 : 1;
+  if (isLowPowerMode()) return 0.62;
+  return document.documentElement.classList.contains("mobile-view") ? 0.82 : 1;
 }
 
 function applyRenderScale() {
@@ -67,6 +70,18 @@ function applyRenderScale() {
 }
 
 const unitSpriteCache = new Map();
+const LIMITS = {
+  units: 56,
+  unitsLow: 38,
+  projectiles: 28,
+  projectilesLow: 14,
+  towerShots: 18,
+  towerShotsLow: 8,
+  effects: 26,
+  effectsLow: 8,
+  spirits: 20,
+  spiritsLow: 8,
+};
 const SAVE_KEY = "iron-clash-legends-save-v1";
 const RESET_PROGRESS_KEY = "iron-clash-legends-progress-reset-2026-05-27";
 const STARTER_CARDS = ["tank", "ranger", "swordsman", "mage", "catgirl", "fireball", "freeze", "heal", "haste"];
@@ -348,6 +363,8 @@ const state = {
   projectiles: [],
   towerShots: [],
   effects: [],
+  spirits: [],
+  laneUnits: [[], [], []],
   arenaCache: null,
   arenaCacheKey: "",
   shake: 0,
@@ -361,7 +378,24 @@ const state = {
   endlessTier: 0,
   endlessNextScale: 20,
   soundOn: true,
+  lowGraphics: false,
   audio: null,
+  rafId: 0,
+  perf: {
+    fps: 0,
+    frameCount: 0,
+    fpsTimer: 0,
+    updateMs: 0,
+    drawMs: 0,
+    targetChecks: 0,
+    collisionChecks: 0,
+    targetSearches: 0,
+    lastPanelUpdate: 0,
+  },
+  effectPool: [],
+  projectilePool: [],
+  towerShotPool: [],
+  spiritPool: [],
 };
 window.__ironClashStateReady = true;
 
@@ -388,6 +422,11 @@ function loadSave() {
     if (typeof save.soundOn === "boolean") {
       state.soundOn = save.soundOn;
       soundToggle.textContent = state.soundOn ? "Звук: вкл" : "Звук: выкл";
+    }
+    if (typeof save.lowGraphics === "boolean") {
+      state.lowGraphics = save.lowGraphics;
+      document.documentElement.classList.toggle("low-graphics", state.lowGraphics);
+      document.documentElement.classList.toggle("pretty-graphics", !state.lowGraphics);
     }
     if (Number.isInteger(save.campaignProgress)) {
       state.campaignProgress = Math.max(1, Math.min(campaignLevels.length + 1, save.campaignProgress));
@@ -420,6 +459,7 @@ function saveSettings() {
         battleDeck: state.battleDeck,
         difficulty: state.difficulty,
         soundOn: state.soundOn,
+        lowGraphics: state.lowGraphics,
         campaignProgress: state.campaignProgress,
         coins: state.coins,
         trophies: state.trophies,
@@ -470,6 +510,104 @@ function isCardUnlocked(cardId) {
 
 function getBattleCards() {
   return state.battleDeck.map((id) => deck.find((card) => card.id === id)).filter(Boolean);
+}
+
+function objectLimits() {
+  const low = isLowPowerMode();
+  return {
+    units: low ? LIMITS.unitsLow : LIMITS.units,
+    projectiles: low ? LIMITS.projectilesLow : LIMITS.projectiles,
+    towerShots: low ? LIMITS.towerShotsLow : LIMITS.towerShots,
+    effects: low ? LIMITS.effectsLow : LIMITS.effects,
+    spirits: low ? LIMITS.spiritsLow : LIMITS.spirits,
+  };
+}
+
+function isUnitActive(unit) {
+  return unit && unit.hp > 0 && !unit.dying;
+}
+
+function canSpawnUnit(team, role) {
+  const limits = objectLimits();
+  if (state.units.filter(isUnitActive).length >= limits.units) {
+    if (role !== "skeleton") return false;
+    const oldSkeleton = state.units.find((unit) => isUnitActive(unit) && unit.role === "skeleton");
+    if (oldSkeleton) oldSkeleton.hp = 0;
+    return Boolean(oldSkeleton);
+  }
+  const teamLimit = Math.ceil(limits.units * 0.58);
+  return state.units.filter((unit) => isUnitActive(unit) && unit.team === team).length < teamLimit || role === "skeleton";
+}
+
+function pooledPush(list, pool, limit, data) {
+  if (list.length >= limit) return null;
+  const item = pool.pop() || {};
+  Object.keys(item).forEach((key) => delete item[key]);
+  Object.assign(item, data);
+  list.push(item);
+  return item;
+}
+
+function spawnProjectile(data) {
+  if (!data.maxLife && data.life) data.maxLife = data.life;
+  return pooledPush(state.projectiles, state.projectilePool, objectLimits().projectiles, data);
+}
+
+function spawnTowerShot(data) {
+  return pooledPush(state.towerShots, state.towerShotPool, objectLimits().towerShots, data);
+}
+
+function spawnEffect(data) {
+  return pooledPush(state.effects, state.effectPool, objectLimits().effects, data);
+}
+
+function spawnSpirit(data) {
+  return pooledPush(state.spirits, state.spiritPool, objectLimits().spirits, data);
+}
+
+function releaseInactive(list, pool) {
+  for (let i = list.length - 1; i >= 0; i -= 1) {
+    if (list[i].life > 0) continue;
+    const item = list.splice(i, 1)[0];
+    if (pool.length < 80) pool.push(item);
+  }
+}
+
+function resetFramePerf() {
+  state.perf.targetChecks = 0;
+  state.perf.collisionChecks = 0;
+  state.perf.targetSearches = 0;
+}
+
+function updateFpsStats(dt) {
+  state.perf.frameCount += 1;
+  state.perf.fpsTimer += dt;
+  if (state.perf.fpsTimer >= 0.5) {
+    state.perf.fps = Math.round(state.perf.frameCount / state.perf.fpsTimer);
+    state.perf.frameCount = 0;
+    state.perf.fpsTimer = 0;
+  }
+}
+
+function rebuildLaneUnits() {
+  state.laneUnits = [[], [], []];
+  for (const unit of state.units) {
+    if (isUnitActive(unit)) state.laneUnits[unit.lane].push(unit);
+  }
+}
+
+function updatePerfPanel() {
+  if (!perfPanel) return;
+  const now = performance.now();
+  if (now - state.perf.lastPanelUpdate < 250) return;
+  state.perf.lastPanelUpdate = now;
+  const slowPart = state.perf.updateMs > state.perf.drawMs + 1 ? "update" : state.perf.drawMs > state.perf.updateMs + 1 ? "draw" : "ровно";
+  perfPanel.innerHTML = `
+    <b>FPS ${state.perf.fps}</b><span>${slowPart}</span>
+    <span>U:${state.units.length} P:${state.projectiles.length} E:${state.effects.length + state.spirits.length}</span>
+    <span>check:${state.perf.targetChecks}/${state.perf.collisionChecks}</span>
+    <span>update:${state.perf.updateMs.toFixed(1)}ms draw:${state.perf.drawMs.toFixed(1)}ms</span>
+  `;
 }
 
 function makeEnemyDeck() {
@@ -656,6 +794,7 @@ function resetMatch() {
   state.projectiles = [];
   state.towerShots = [];
   state.effects = [];
+  state.spirits = [];
   state.nextUnitId = 1;
   state.botDelay = difficultyConfig().maxThink;
   state.playerTowerCooldown = 0.35;
@@ -668,7 +807,7 @@ function resetMatch() {
   setLane(1);
   renderHand();
   showToast(campaign ? campaign.title : state.matchMode === "ranked" ? `Рейтинг: ${state.trophies} кубков` : `Сложность: ${difficultyConfig().label}`);
-  requestAnimationFrame(loop);
+  startLoop();
 }
 
 function renderHand() {
@@ -773,6 +912,14 @@ function renderProgress() {
   const today = todayKey();
   dailyBonusBtn.disabled = state.lastDaily === today;
   dailyBonusBtn.textContent = state.lastDaily === today ? "Бонус получен" : "Дневной бонус +25";
+}
+
+function renderGraphicsToggle() {
+  if (!graphicsToggle) return;
+  graphicsToggle.textContent = state.lowGraphics ? "Графика: быстро" : "Графика: красиво";
+  document.documentElement.classList.toggle("low-graphics", state.lowGraphics);
+  document.documentElement.classList.toggle("pretty-graphics", !state.lowGraphics);
+  invalidateArenaCache();
 }
 
 function todayKey() {
@@ -959,6 +1106,10 @@ function setLane(lane) {
 
 function spawnUnit(team, card, lane) {
   const stats = card.stats;
+  if (!canSpawnUnit(team, stats.role)) {
+    if (team === "player") showToast("Слишком много юнитов на поле");
+    return;
+  }
   const path = laneRoadPoints(lane, team);
   const start = path[0];
   const x = start.x + (Math.random() - 0.5) * 18;
@@ -1002,6 +1153,9 @@ function spawnUnit(team, card, lane) {
     shootAnim: 0,
     attackAnim: 0,
     flash: 0,
+    targetId: null,
+    targetRef: null,
+    targetScanTimer: Math.random() * 0.12,
     walk: Math.random() * 10,
   };
   state.units.push(unit);
@@ -1011,6 +1165,7 @@ function spawnUnit(team, card, lane) {
 }
 
 function spawnSkeleton(team, lane, y, xHint = null, pathStepHint = 1) {
+  if (!canSpawnUnit(team, "skeleton")) return;
   const dir = team === "player" ? -1 : 1;
   const x = (xHint ?? laneX(lane)) + (Math.random() - 0.5) * 22;
   state.units.push({
@@ -1051,6 +1206,9 @@ function spawnSkeleton(team, lane, y, xHint = null, pathStepHint = 1) {
     shootAnim: 0,
     attackAnim: 0,
     flash: 0,
+    targetId: null,
+    targetRef: null,
+    targetScanTimer: Math.random() * 0.12,
     walk: Math.random() * 10,
   });
   burst(x, y, "#d8e0d8", 24);
@@ -1117,7 +1275,7 @@ function castSpell(team, spell, lane, targetX = null, targetY = null) {
   }
   if (spell === "lightning") {
     const target = state.units
-      .filter((unit) => unit.team === foe && unit.lane === lane)
+      .filter((unit) => isUnitActive(unit) && unit.team === foe && unit.lane === lane)
       .sort((a, b) => b.hp - a.hp || Math.abs(a.y - offensiveY) - Math.abs(b.y - offensiveY))[0];
     if (target) {
       hitUnit(target, 350);
@@ -1139,7 +1297,7 @@ function castSpell(team, spell, lane, targetX = null, targetY = null) {
 }
 
 function unitsNear(team, lane, y, radius) {
-  return state.units.filter((unit) => unit.team === team && unit.lane === lane && Math.abs(unit.y - y) <= radius);
+  return state.units.filter((unit) => isUnitActive(unit) && unit.team === team && unit.lane === lane && Math.abs(unit.y - y) <= radius);
 }
 
 function damageArea(team, lane, y, radius, amount) {
@@ -1147,6 +1305,7 @@ function damageArea(team, lane, y, radius, amount) {
 }
 
 function hitUnit(unit, amount) {
+  if (!isUnitActive(unit)) return;
   const guardedAmount = applyGuard(unit, amount);
   amount = guardedAmount.amount;
   if (guardedAmount.guarded) unit.shield = Math.max(unit.shield || 0, 8);
@@ -1158,12 +1317,13 @@ function hitUnit(unit, amount) {
   sparks(unit.x, unit.y, amount > 100 ? 15 : 8);
   if (amount >= 90) screenShake(4);
   sound("hit");
+  if (unit.hp <= 0) startUnitDeath(unit);
 }
 
 function applyGuard(unit, amount) {
   if (unit.role === "tank" || unit.role === "catapult") return { amount, guarded: false };
   const guard = state.units.find((ally) => {
-    if (ally.team !== unit.team || ally.lane !== unit.lane || ally.role !== "tank" || ally.hp <= 0) return false;
+    if (ally.team !== unit.team || ally.lane !== unit.lane || ally.role !== "tank" || !isUnitActive(ally)) return false;
     const inFront = unit.team === "player" ? ally.y < unit.y + 8 : ally.y > unit.y - 8;
     return inFront && Math.abs(ally.y - unit.y) <= 150;
   });
@@ -1213,23 +1373,23 @@ function update(dt) {
   state.botDelay -= dt;
   if (state.botDelay <= 0) botMove();
 
+  rebuildLaneUnits();
   state.units.forEach((unit) => updateUnit(unit, dt));
   updateTowers(dt);
   state.projectiles.forEach((projectile) => updateProjectile(projectile, dt));
   state.towerShots.forEach((shot) => updateTowerShot(shot, dt));
   state.units.forEach((unit) => {
     if (unit.hp <= 0 && !unit.deadEffect) {
-      unit.deadEffect = true;
-      deathPoof(unit.x, unit.y, unit.team === "player" ? palette.player : palette.enemy);
-      screenShake(unit.maxHp > 250 ? 5 : 2.5);
-      sound("death");
+      startUnitDeath(unit);
     }
   });
-  state.units = state.units.filter((unit) => unit.hp > 0);
-  state.projectiles = state.projectiles.filter((projectile) => projectile.life > 0);
-  state.towerShots = state.towerShots.filter((shot) => shot.life > 0);
+  state.units = state.units.filter((unit) => unit.hp > 0 || unit.dying);
+  releaseInactive(state.projectiles, state.projectilePool);
+  releaseInactive(state.towerShots, state.towerShotPool);
   state.effects.forEach((effect) => (effect.life -= dt));
-  state.effects = state.effects.filter((effect) => effect.life > 0);
+  releaseInactive(state.effects, state.effectPool);
+  state.spirits.forEach((spirit) => (spirit.life -= dt));
+  releaseInactive(state.spirits, state.spiritPool);
 
   if (!isEndlessMode() && state.enemyBase <= 0) finish("Победа", "База противника разрушена.");
   if (state.playerBase <= 0) finish("Поражение", "Твоя база разрушена.");
@@ -1240,6 +1400,40 @@ function update(dt) {
   }
 }
 
+function startUnitDeath(unit) {
+  if (!unit || unit.dying) return;
+  unit.hp = 0;
+  unit.dying = true;
+  unit.deadEffect = true;
+  unit.deathTimer = isLowPowerMode() ? 0.8 : 1.05;
+  unit.deathMax = unit.deathTimer;
+  unit.spiritDelay = 0.24;
+  unit.spiritSpawned = false;
+  unit.cooldown = 999;
+  unit.attackAnim = 0;
+  unit.shootAnim = 0;
+  unit.freeze = 0;
+  unit.stun = 0;
+  unit.haste = 0;
+  unit.slow = 0;
+  unit.regen = 0;
+  unit.burn = 0;
+  unit.shield = 0;
+  deathPoof(unit.x, unit.y, unit.team === "player" ? palette.player : palette.enemy);
+  screenShake(unit.maxHp > 250 ? 5 : 2.5);
+  sound("death");
+}
+
+function updateDyingUnit(unit, dt) {
+  unit.deathTimer = Math.max(0, (unit.deathTimer || 0) - dt);
+  unit.spiritDelay = Math.max(0, (unit.spiritDelay || 0) - dt);
+  if (!unit.spiritSpawned && unit.spiritDelay <= 0) {
+    unit.spiritSpawned = true;
+    createSpirit(unit);
+  }
+  if (unit.deathTimer <= 0) unit.dying = false;
+}
+
 function tickSpellCooldowns(cooldowns, dt) {
   Object.keys(cooldowns).forEach((spell) => {
     cooldowns[spell] = Math.max(0, cooldowns[spell] - dt);
@@ -1247,6 +1441,10 @@ function tickSpellCooldowns(cooldowns, dt) {
 }
 
 function updateUnit(unit, dt) {
+  if (unit.dying) {
+    updateDyingUnit(unit, dt);
+    return;
+  }
   unit.spawnEase = Math.min(1, (unit.spawnEase || 0) + dt * 2.8);
   unit.cooldown -= dt * (unit.haste > 0 ? 1.65 : 1);
   unit.freeze = Math.max(0, unit.freeze - dt);
@@ -1282,6 +1480,10 @@ function updateUnit(unit, dt) {
     unit.burn = Math.max(0, unit.burn - dt);
     unit.hp -= 16 * dt;
     if (Math.random() < dt * 8) sparks(unit.x, unit.y, 3);
+    if (unit.hp <= 0) {
+      startUnitDeath(unit);
+      return;
+    }
   }
   if (unit.regen > 0) {
     const healed = Math.min(unit.maxHp - unit.hp, (unit.regenRate || 0) * dt);
@@ -1305,7 +1507,7 @@ function updateUnit(unit, dt) {
     if (ally) return;
   }
 
-  const target = findTarget(unit);
+  const target = cachedTarget(unit, dt);
   const targetTeam = unit.team === "player" ? "enemy" : "player";
   const baseAttackPoint = baseHitPoint(targetTeam, unit.lane);
   const baseDistance = Math.hypot(baseAttackPoint.x - unit.x, baseAttackPoint.y - unit.y);
@@ -1317,15 +1519,12 @@ function updateUnit(unit, dt) {
   const roadEnd = roadPath[roadPath.length - 1];
   const reachedEmptyEnd = Math.hypot(roadEnd.x - unit.x, roadEnd.y - unit.y) <= 18 || unit.pathStep >= roadPath.length;
   if (!targetBaseExists && !target && reachedEmptyEnd) {
-    unit.hp = 0;
-    deathPoof(unit.x, unit.y, unit.team === "player" ? palette.player : palette.enemy);
+    startUnitDeath(unit);
     return;
   }
 
   if (unit.role === "catapult") {
-    const flyingTarget = state.units
-      .filter((other) => other.team !== unit.team && other.lane === unit.lane && other.flying)
-      .sort((a, b) => Math.abs(a.y - unit.y) - Math.abs(b.y - unit.y))[0];
+    const flyingTarget = nearestFlyingTarget(unit);
     if (flyingTarget && Math.abs(flyingTarget.y - unit.y) <= unit.range) {
       if (unit.cooldown <= 0) {
         launchAntiAir(unit, flyingTarget);
@@ -1411,7 +1610,7 @@ function moveAlongRoad(unit, distance) {
 function launchSiege(unit, targetBaseTeam) {
   const base = baseHitPoint(targetBaseTeam, unit.lane);
   unit.shootAnim = 0.55;
-  state.projectiles.push({
+  spawnProjectile({
     team: unit.team,
     x: unit.x + unit.dir * 16,
     y: unit.y - 30,
@@ -1434,7 +1633,7 @@ function launchSiege(unit, targetBaseTeam) {
 
 function launchAntiAir(unit, target) {
   unit.shootAnim = 0.55;
-  state.projectiles.push({
+  spawnProjectile({
     team: unit.team,
     x: unit.x + unit.dir * 16,
     y: unit.y - 30,
@@ -1455,22 +1654,23 @@ function launchAntiAir(unit, target) {
 
 function findHealTarget(unit) {
   const allies = state.units
-    .filter((other) => other.team === unit.team && other.lane === unit.lane && other.id !== unit.id && other.hp < other.maxHp && Math.abs(other.y - unit.y) <= unit.range)
+    .filter((other) => isUnitActive(other) && other.team === unit.team && other.lane === unit.lane && other.id !== unit.id && other.hp < other.maxHp && Math.abs(other.y - unit.y) <= unit.range)
     .sort((a, b) => a.hp / a.maxHp - b.hp / b.maxHp);
   return allies[0] || null;
 }
 
 function healUnit(unit, amount) {
+  if (!isUnitActive(unit)) return;
   unit.hp = Math.min(unit.maxHp, unit.hp + amount);
   unit.flash = 0.22;
 }
 
 function nearbyAllies(unit, radius) {
-  return state.units.filter((ally) => ally.team === unit.team && ally.id !== unit.id && ally.hp > 0 && Math.hypot(ally.x - unit.x, ally.y - unit.y) <= radius);
+  return state.units.filter((ally) => isUnitActive(ally) && ally.team === unit.team && ally.id !== unit.id && Math.hypot(ally.x - unit.x, ally.y - unit.y) <= radius);
 }
 
 function hasCatgirlAura(unit) {
-  return state.units.some((ally) => ally.team === unit.team && ally.id !== unit.id && ally.role === "catgirl" && ally.hp > 0 && Math.hypot(ally.x - unit.x, ally.y - unit.y) <= 135);
+  return state.units.some((ally) => isUnitActive(ally) && ally.team === unit.team && ally.id !== unit.id && ally.role === "catgirl" && Math.hypot(ally.x - unit.x, ally.y - unit.y) <= 135);
 }
 
 function unitDamage(unit) {
@@ -1478,7 +1678,13 @@ function unitDamage(unit) {
 }
 
 function findTarget(unit) {
-  const enemies = state.units.filter((other) => other.team !== unit.team && other.lane === unit.lane && canTargetUnit(unit, other));
+  state.perf.targetSearches += 1;
+  const enemies = [];
+  const laneUnits = state.laneUnits?.[unit.lane] || state.units;
+  for (const other of laneUnits) {
+    state.perf.targetChecks += 1;
+    if (isUnitActive(other) && other.team !== unit.team && canTargetUnit(unit, other)) enemies.push(other);
+  }
   if (!enemies.length) return null;
   if (unit.leap) {
     const fragile = enemies
@@ -1490,14 +1696,46 @@ function findTarget(unit) {
   return enemies.sort((a, b) => Math.abs(a.y - unit.y) - Math.abs(b.y - unit.y))[0];
 }
 
+function cachedTarget(unit, dt) {
+  const current = unit.targetRef;
+  if (current && isUnitActive(current) && current.team !== unit.team && current.lane === unit.lane && canTargetUnit(unit, current)) {
+    unit.targetScanTimer = Math.max(0, (unit.targetScanTimer || 0) - dt);
+    if (unit.targetScanTimer > 0) return current;
+  }
+  unit.targetScanTimer = Math.max(0, (unit.targetScanTimer || 0) - dt);
+  if (unit.targetScanTimer > 0 && current && isUnitActive(current)) return current;
+  unit.targetScanTimer = 0.15 + Math.random() * 0.1;
+  const target = findTarget(unit);
+  unit.targetId = target?.id || null;
+  unit.targetRef = target || null;
+  return target;
+}
+
+function nearestFlyingTarget(unit) {
+  let best = null;
+  let bestDistance = Infinity;
+  const laneUnits = state.laneUnits?.[unit.lane] || state.units;
+  for (const other of laneUnits) {
+    state.perf.targetChecks += 1;
+    if (!isUnitActive(other) || other.team === unit.team || !other.flying) continue;
+    const distance = Math.abs(other.y - unit.y);
+    if (distance < bestDistance) {
+      best = other;
+      bestDistance = distance;
+    }
+  }
+  return best;
+}
+
 function canTargetUnit(attacker, target) {
+  if (!isUnitActive(target)) return false;
   if (!target.flying) return true;
   return ["ranger", "mage", "necromancer", "priest", "catgirl", "dragon", "catapult"].includes(attacker.role);
 }
 
 function isFrontBlocked(unit, target) {
   return state.units.some((other) => {
-    if (other.team === unit.team || other.lane !== unit.lane || other.id === target.id || other.hp <= 0) return false;
+    if (other.team === unit.team || other.lane !== unit.lane || other.id === target.id || !isUnitActive(other)) return false;
     const between = unit.team === "player" ? other.y < unit.y && other.y > target.y : other.y > unit.y && other.y < target.y;
     const isFrontline = other.maxHp > 200 || ["tank", "swordsman", "skeleton", "catapult"].includes(other.role);
     return between && isFrontline;
@@ -1507,7 +1745,7 @@ function isFrontBlocked(unit, target) {
 function attack(attacker, target) {
   const damage = unitDamage(attacker);
   if (["ranger", "mage", "necromancer", "catgirl", "dragon"].includes(attacker.role)) {
-    state.projectiles.push({
+    spawnProjectile({
       team: attacker.team,
       x: attacker.x + attacker.dir * 18,
       y: attacker.y - (attacker.flying ? 46 : 12),
@@ -1544,7 +1782,7 @@ function updateProjectile(projectile, dt) {
     }
     return;
   }
-  const target = state.units.find((unit) => unit.id === projectile.targetId);
+  const target = state.units.find((unit) => unit.id === projectile.targetId && isUnitActive(unit));
   if (target) {
     projectile.tx = target.x;
     projectile.ty = target.y - (target.flying ? 42 : 0);
@@ -1562,12 +1800,14 @@ function updateProjectile(projectile, dt) {
       hitUnit(target, projectile.damage);
       if (projectile.slow) target.slow = Math.max(target.slow || 0, projectile.slow);
       if (projectile.splash) {
-        state.units
-          .filter((unit) => unit.team !== projectile.team && unit.lane === target.lane && unit.id !== target.id && Math.abs(unit.y - target.y) < projectile.splash)
-          .forEach((unit) => {
+        const laneUnits = state.laneUnits?.[target.lane] || state.units;
+        laneUnits.forEach((unit) => {
+          state.perf.collisionChecks += 1;
+          if (isUnitActive(unit) && unit.team !== projectile.team && unit.id !== target.id && Math.abs(unit.y - target.y) < projectile.splash) {
             hitUnit(unit, projectile.damage * 0.55);
             if (projectile.slow) unit.slow = Math.max(unit.slow || 0, projectile.slow * 0.75);
-          });
+          }
+        });
         burst(target.x, target.y, palette.violet, 46);
         frost(target.x, target.y, 8);
       }
@@ -1589,19 +1829,22 @@ function tryTowerFire(team) {
   const cooldownKey = team === "player" ? "playerTowerCooldown" : "enemyTowerCooldown";
   if (state[cooldownKey] > 0) return;
 
-  const target = state.units
-    .filter((unit) => unit.team === foe && Math.abs(unit.y - base.y) < 330)
-    .sort((a, b) => {
-      if (a.flying && !b.flying) return -1;
-      if (b.flying && !a.flying) return 1;
-      if (a.role === "catapult" && b.role !== "catapult") return -1;
-      if (b.role === "catapult" && a.role !== "catapult") return 1;
-      return Math.abs(a.y - base.y) - Math.abs(b.y - base.y);
-    })[0];
+  let target = null;
+  let bestScore = Infinity;
+  for (const unit of state.units) {
+    state.perf.targetChecks += 1;
+    if (!isUnitActive(unit) || unit.team !== foe || Math.abs(unit.y - base.y) >= 330) continue;
+    const priority = unit.flying ? -3000 : unit.role === "catapult" ? -1800 : 0;
+    const score = Math.abs(unit.y - base.y) + priority;
+    if (score < bestScore) {
+      bestScore = score;
+      target = unit;
+    }
+  }
   if (!target) return;
 
   state[cooldownKey] = 1.05;
-  state.towerShots.push({
+  spawnTowerShot({
     team,
     x: base.x,
     y: base.y,
@@ -1616,7 +1859,7 @@ function tryTowerFire(team) {
 }
 
 function updateTowerShot(shot, dt) {
-  const target = state.units.find((unit) => unit.id === shot.targetId);
+  const target = state.units.find((unit) => unit.id === shot.targetId && isUnitActive(unit));
   if (target) {
     shot.tx = target.x;
     shot.ty = target.y - (target.flying ? 42 : 10);
@@ -1642,8 +1885,8 @@ function botMove() {
   const config = difficultyConfig();
   state.botDelay = config.minThink + Math.random() * (config.maxThink - config.minThink);
   const pressure = lanes.map((_, lane) => {
-    const player = state.units.filter((u) => u.team === "player" && u.lane === lane).reduce((sum, u) => sum + u.hp + u.damage * 6, 0);
-    const enemy = state.units.filter((u) => u.team === "enemy" && u.lane === lane).reduce((sum, u) => sum + u.hp + u.damage * 6, 0);
+    const player = state.units.filter((u) => isUnitActive(u) && u.team === "player" && u.lane === lane).reduce((sum, u) => sum + u.hp + u.damage * 6, 0);
+    const enemy = state.units.filter((u) => isUnitActive(u) && u.team === "enemy" && u.lane === lane).reduce((sum, u) => sum + u.hp + u.damage * 6, 0);
     return player - enemy;
   });
   const threatLane = findBotThreatLane();
@@ -1667,7 +1910,7 @@ function botMove() {
   let castX = config.smart ? targetSpellX("player", lane) : H / 2;
   let castLane = lane;
   if (config.smart && threatLane >= 0) {
-    const siegeTarget = state.units.find((unit) => unit.team === "player" && unit.lane === threatLane && unit.role === "catapult");
+    const siegeTarget = state.units.find((unit) => isUnitActive(unit) && unit.team === "player" && unit.lane === threatLane && unit.role === "catapult");
     card = affordableSpells.find((item) => item.id === "lightning") || affordableSpells.find((item) => item.id === "fireball") || affordableSpells.find((item) => item.id === "freeze");
     if (card) {
       castLane = threatLane;
@@ -1677,7 +1920,7 @@ function botMove() {
   const woundedLane = lanes
     .map((_, index) => ({
       lane: index,
-      wounded: state.units.filter((u) => u.team === "enemy" && u.lane === index && u.hp < u.maxHp * 0.65).length,
+      wounded: state.units.filter((u) => isUnitActive(u) && u.team === "enemy" && u.lane === index && u.hp < u.maxHp * 0.65).length,
     }))
     .sort((a, b) => b.wounded - a.wounded)[0];
   if (!card && config.smart && woundedLane.wounded >= 2 && state.enemyEnergy >= 3 && Math.random() < config.spellChance) {
@@ -1774,27 +2017,27 @@ function shouldBotBankEnergy(pressure, defenseLane, attackLane, affordableUnits,
 }
 
 function shouldBotUseCatapult(pressure, attackLane, config) {
-  const activeCatapults = state.units.filter((unit) => unit.team === "enemy" && unit.role === "catapult").length;
+  const activeCatapults = state.units.filter((unit) => isUnitActive(unit) && unit.team === "enemy" && unit.role === "catapult").length;
   if (activeCatapults >= 1) return false;
   const strongestPlayerLane = Math.max(...pressure);
   if (strongestPlayerLane > (config.strict ? 180 : 260)) return false;
   const bossFinal = state.activeCampaignId === "king";
   if (pressure[attackLane] > (bossFinal ? -40 : -120)) return false;
-  const escort = state.units.some((unit) => unit.team === "enemy" && unit.lane === attackLane && ["tank", "swordsman", "skeleton", "ranger"].includes(unit.role));
+  const escort = state.units.some((unit) => isUnitActive(unit) && unit.team === "enemy" && unit.lane === attackLane && ["tank", "swordsman", "skeleton", "ranger"].includes(unit.role));
   return escort || state.enemyEnergy >= (bossFinal ? 7 : config.strict ? 8.5 : 9.5);
 }
 
 function chooseBotUnit(units, pressure, defenseLane, attackLane, config) {
-  const enemyOnDefense = state.units.filter((unit) => unit.team === "enemy" && unit.lane === defenseLane);
+  const enemyOnDefense = state.units.filter((unit) => isUnitActive(unit) && unit.team === "enemy" && unit.lane === defenseLane);
   const hasFront = enemyOnDefense.some((unit) => unit.role === "tank" || unit.role === "swordsman" || unit.role === "skeleton");
-  const enemyOnAttack = state.units.filter((unit) => unit.team === "enemy" && unit.lane === attackLane);
-  const playerBackline = state.units.some((unit) => unit.team === "player" && unit.lane === defenseLane && ["ranger", "mage", "priest", "catgirl", "necromancer"].includes(unit.role));
-  const playerHeavy = state.units.some((unit) => unit.team === "player" && unit.lane === defenseLane && ["tank", "catapult", "dragon"].includes(unit.role));
-  const alliedCatapultLane = lanes.findIndex((_, lane) => state.units.some((unit) => unit.team === "enemy" && unit.lane === lane && unit.role === "catapult"));
+  const enemyOnAttack = state.units.filter((unit) => isUnitActive(unit) && unit.team === "enemy" && unit.lane === attackLane);
+  const playerBackline = state.units.some((unit) => isUnitActive(unit) && unit.team === "player" && unit.lane === defenseLane && ["ranger", "mage", "priest", "catgirl", "necromancer"].includes(unit.role));
+  const playerHeavy = state.units.some((unit) => isUnitActive(unit) && unit.team === "player" && unit.lane === defenseLane && ["tank", "catapult", "dragon"].includes(unit.role));
+  const alliedCatapultLane = lanes.findIndex((_, lane) => state.units.some((unit) => isUnitActive(unit) && unit.team === "enemy" && unit.lane === lane && unit.role === "catapult"));
   if (state.botStyle === "defensive" && pressure[defenseLane] > 120) return units.find((item) => ["tank", "swordsman", "priest"].includes(item.id));
   if (state.botStyle === "aggressive" && pressure[attackLane] < -120) return units.find((item) => ["assassin", "ranger", "mage", "catapult"].includes(item.id));
   if (alliedCatapultLane >= 0) {
-    const catapultProtected = state.units.some((unit) => unit.team === "enemy" && unit.lane === alliedCatapultLane && unit.role !== "catapult" && unit.y < 650);
+    const catapultProtected = state.units.some((unit) => isUnitActive(unit) && unit.team === "enemy" && unit.lane === alliedCatapultLane && unit.role !== "catapult" && unit.y < 650);
     if (!catapultProtected) return units.find((item) => ["tank", "swordsman", "ranger"].includes(item.id));
   }
   if (config.elite && playerHeavy && Math.random() < (config.counterChance || 0.5)) return units.find((item) => ["mage", "dragon", "ranger"].includes(item.id));
@@ -1812,7 +2055,7 @@ function chooseBotLane(card, pressure, defenseLane, attackLane, config) {
   if (card.id === "catapult") return bestBotSiegeLane(pressure, attackLane);
   if (card.id === "assassin" && config.smart) {
     const backlineLane = lanes.findIndex((_, lane) =>
-      state.units.some((unit) => unit.team === "player" && unit.lane === lane && ["ranger", "mage", "priest", "catgirl", "necromancer"].includes(unit.role)),
+      state.units.some((unit) => isUnitActive(unit) && unit.team === "player" && unit.lane === lane && ["ranger", "mage", "priest", "catgirl", "necromancer"].includes(unit.role)),
     );
     if (backlineLane >= 0) return backlineLane;
   }
@@ -1823,8 +2066,8 @@ function chooseBotLane(card, pressure, defenseLane, attackLane, config) {
 function bestBotSiegeLane(pressure, fallbackLane) {
   const ranked = lanes
     .map((_, lane) => {
-      const escortCount = state.units.filter((unit) => unit.team === "enemy" && unit.lane === lane && ["tank", "swordsman", "skeleton", "ranger"].includes(unit.role)).length;
-      const hasCatapult = state.units.some((unit) => unit.team === "enemy" && unit.lane === lane && unit.role === "catapult");
+      const escortCount = state.units.filter((unit) => isUnitActive(unit) && unit.team === "enemy" && unit.lane === lane && ["tank", "swordsman", "skeleton", "ranger"].includes(unit.role)).length;
+      const hasCatapult = state.units.some((unit) => isUnitActive(unit) && unit.team === "enemy" && unit.lane === lane && unit.role === "catapult");
       return { lane, score: -pressure[lane] + escortCount * 170 - (hasCatapult ? 999 : 0) };
     })
     .sort((a, b) => b.score - a.score);
@@ -1846,7 +2089,7 @@ function tryBotFollowUp(opening, lane, pressure, config) {
   } else if (opening.id === "catapult") {
     follow = units.find((card) => ["tank", "swordsman", "ranger"].includes(card.id));
   }
-  if (!follow && state.units.some((unit) => unit.team === "enemy" && unit.lane === lane && unit.role === "catapult")) {
+  if (!follow && state.units.some((unit) => isUnitActive(unit) && unit.team === "enemy" && unit.lane === lane && unit.role === "catapult")) {
     follow = units.find((card) => ["tank", "swordsman", "ranger", "priest"].includes(card.id));
   }
   if (!follow && pressure[lane] < -160) follow = spells.find((card) => card.id === "haste");
@@ -1877,7 +2120,7 @@ function tryBotSpellFollowUp(opening, lane, pressure, config) {
 }
 
 function targetSpellX(team, lane) {
-  const units = state.units.filter((unit) => unit.team === team && unit.lane === lane);
+  const units = state.units.filter((unit) => isUnitActive(unit) && unit.team === team && unit.lane === lane);
   if (!units.length) return team === "player" ? H - 330 : 330;
   const total = units.reduce((sum, unit) => sum + unit.y, 0);
   return Math.max(150, Math.min(H - 150, total / units.length));
@@ -1941,6 +2184,7 @@ function openLobby() {
   state.projectiles = [];
   state.towerShots = [];
   state.effects = [];
+  state.spirits = [];
   state.energy = 4;
   state.enemyEnergy = 4;
   state.playerBase = 1000;
@@ -1958,7 +2202,7 @@ function openLobby() {
   renderDeckEditor();
   renderHand();
   sound("tap");
-  requestAnimationFrame(loop);
+  startLoop();
 }
 
 function invalidateArenaCache() {
@@ -2008,6 +2252,7 @@ function draw() {
   state.towerShots.forEach(drawTowerShot);
   const visibleEffects = isLowPowerMode() ? state.effects.slice(-10) : state.effects;
   visibleEffects.forEach(drawEffect);
+  state.spirits.forEach(drawSpirit);
   drawAimingReticle();
   if (!state.started) drawAttract();
   ctx.restore();
@@ -2016,7 +2261,11 @@ function draw() {
 
 function drawArena() {
   if (isLowPowerMode()) {
-    ctx.fillStyle = "#62bd48";
+    const bg = ctx.createLinearGradient(0, 0, 0, H);
+    bg.addColorStop(0, "#63c95f");
+    bg.addColorStop(0.5, "#7bd35a");
+    bg.addColorStop(1, "#4daf67");
+    ctx.fillStyle = bg;
   } else {
     const bg = ctx.createLinearGradient(0, 0, 0, H);
     bg.addColorStop(0, "#2f9860");
@@ -2028,7 +2277,8 @@ function drawArena() {
   }
   ctx.fillRect(0, 0, W, H);
 
-  drawBackdropDetails();
+  if (isLowPowerMode()) drawLightBackdropDetails();
+  else drawBackdropDetails();
   drawGrass();
 
   const topY = ROAD_TOP_Y;
@@ -2057,7 +2307,10 @@ function drawRoadPath(points, width, radius = 86) {
   ctx.save();
   ctx.lineCap = "round";
   ctx.lineJoin = "round";
-  [["#806326", width + 18], ["#bd8a35", width + 8], ["#f3cb65", width], ["#f8db80", width - 18]].forEach(([color, lineWidth]) => {
+  const layers = isLowPowerMode()
+    ? [["#a97832", width + 10], ["#f0c968", width], ["#ffe08a", width - 18]]
+    : [["#806326", width + 18], ["#bd8a35", width + 8], ["#f3cb65", width], ["#f8db80", width - 18]];
+  layers.forEach(([color, lineWidth]) => {
     ctx.strokeStyle = color;
     ctx.lineWidth = lineWidth;
     ctx.beginPath();
@@ -2227,8 +2480,8 @@ function drawBush(x, y, scale = 1) {
 
 function drawGrass() {
   ctx.save();
-  ctx.globalAlpha = 0.32;
-  const grassCount = 190;
+  ctx.globalAlpha = isLowPowerMode() ? 0.18 : 0.32;
+  const grassCount = isLowPowerMode() ? 70 : 190;
   for (let i = 0; i < grassCount; i += 1) {
     const x = (i * 97) % W;
     const y = (i * 53) % H;
@@ -2455,13 +2708,12 @@ function base(x, y, color, hp, maxHp, label) {
 function drawUnit(unit) {
   const color = unit.team === "player" ? palette.player : palette.enemy;
   const bodyColor = unit.role === "catgirl" ? "#ff9bd5" : color;
-  const leg = Math.sin(unit.walk) * 4;
-  const attackPulse = Math.sin(Math.max(0, unit.attackAnim || 0) * Math.PI * 8) * Math.min(1, (unit.attackAnim || 0) * 4);
-  const lunge = attackPulse * (unit.role === "catapult" ? -5 : unit.flying ? 9 : 12);
+  const deathProgress = unit.dying ? 1 - Math.max(0, unit.deathTimer || 0) / Math.max(0.1, unit.deathMax || 1) : 0;
+  const leg = unit.dying ? 0 : Math.sin(unit.walk) * 4;
+  const attackPulse = unit.dying ? 0 : Math.sin(Math.max(0, unit.attackAnim || 0) * Math.PI * 8) * Math.min(1, (unit.attackAnim || 0) * 4);
+  const lunge = unit.dying ? 0 : attackPulse * (unit.role === "catapult" ? -5 : unit.flying ? 9 : 12);
   ctx.save();
   ctx.translate(unit.x, unit.y + unit.dir * lunge + (unit.flying ? -34 + Math.sin(unit.walk * 1.6) * 7 : 0));
-  ctx.scale(unit.team === "player" ? 1 : -1, 1);
-
   ctx.shadowColor = unit.flash > 0 ? palette.gold : "rgba(59,37,22,0.45)";
   ctx.shadowBlur = isLowPowerMode() ? 0 : unit.flash > 0 ? 20 : 8;
   ctx.fillStyle = "rgba(54,34,21,0.24)";
@@ -2473,12 +2725,19 @@ function drawUnit(unit) {
   ctx.beginPath();
   ctx.ellipse(0, unit.size + (unit.flying ? 46 : 14), unit.size * (unit.flying ? 1.8 : 1.28), unit.flying ? 14 : 11, 0, 0, Math.PI * 2);
   ctx.stroke();
+  ctx.scale(unit.team === "player" ? 1 : -1, 1);
+  if (unit.dying) {
+    ctx.globalAlpha = 0.78;
+    ctx.translate(unit.size * 0.15, unit.size * 0.72);
+    ctx.rotate((unit.team === "player" ? -1 : 1) * (Math.PI / 2) * Math.min(1, deathProgress * 4));
+    ctx.scale(1, 0.9);
+  }
 
   if (isLowPowerMode()) {
     drawCachedUnitSprite(unit);
     drawUnitStatusOverlays(unit);
     ctx.restore();
-    miniBar(unit.x - 28, unit.y - unit.size - 30, 56, 8, unit.hp / unit.maxHp, unit.team === "player" ? palette.green : palette.enemy);
+    if (!unit.dying) miniBar(unit.x - 28, unit.y - unit.size - 30, 56, 8, unit.hp / unit.maxHp, unit.team === "player" ? palette.green : palette.enemy);
     return;
   }
 
@@ -2593,7 +2852,7 @@ function drawUnit(unit) {
   }
 
   ctx.restore();
-  miniBar(unit.x - 28, unit.y - unit.size - 30, 56, 8, unit.hp / unit.maxHp, unit.team === "player" ? palette.green : palette.enemy);
+  if (!unit.dying) miniBar(unit.x - 28, unit.y - unit.size - 30, 56, 8, unit.hp / unit.maxHp, unit.team === "player" ? palette.green : palette.enemy);
 }
 
 function drawCatapultBody(unit) {
@@ -3112,6 +3371,45 @@ function drawEffect(effect) {
   ctx.restore();
 }
 
+function drawSpirit(spirit) {
+  const progress = Math.max(0, Math.min(1, 1 - spirit.life / spirit.maxLife));
+  const alpha = Math.max(0, 1 - progress);
+  const x = spirit.x + Math.sin(spirit.seed + progress * Math.PI * 2) * 7;
+  const y = spirit.startY - spirit.rise * progress;
+  const scale = 1 + progress * 0.28;
+  ctx.save();
+  ctx.globalAlpha = alpha * 0.86;
+  ctx.translate(x, y);
+  ctx.scale(scale, scale);
+  ctx.shadowColor = "#d9fbff";
+  ctx.shadowBlur = isLowPowerMode() ? 0 : 16;
+  const r = Math.max(12, spirit.size * 0.72);
+  const grad = ctx.createRadialGradient(0, -r * 0.1, 2, 0, 0, r * 1.4);
+  grad.addColorStop(0, "rgba(255,255,255,0.95)");
+  grad.addColorStop(0.42, "rgba(217,251,255,0.68)");
+  grad.addColorStop(1, "rgba(121,215,255,0)");
+  ctx.fillStyle = grad;
+  ctx.beginPath();
+  ctx.ellipse(0, 0, r * 0.62, r, 0, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.fillStyle = "rgba(255,255,255,0.72)";
+  ctx.beginPath();
+  ctx.arc(-r * 0.18, -r * 0.18, r * 0.12, 0, Math.PI * 2);
+  ctx.arc(r * 0.18, -r * 0.18, r * 0.12, 0, Math.PI * 2);
+  ctx.fill();
+  if (!isLowPowerMode()) {
+    ctx.fillStyle = "rgba(217,251,255,0.72)";
+    for (let i = 0; i < 5; i += 1) {
+      const a = spirit.seed + i * 1.26 + progress * 2.4;
+      const d = 18 + progress * 18;
+      ctx.beginPath();
+      ctx.arc(Math.cos(a) * d, Math.sin(a) * d - progress * 10, 2.6, 0, Math.PI * 2);
+      ctx.fill();
+    }
+  }
+  ctx.restore();
+}
+
 function drawAimingReticle() {
   if (!state.started || state.gameOver) return;
   const card = deck.find((item) => item.id === state.selectedCard);
@@ -3449,32 +3747,47 @@ function shadeColor(hex, amount) {
 }
 
 function canAddEffect() {
-  return !isLowPowerMode() || state.effects.length < 10;
+  return state.effects.length < objectLimits().effects;
 }
 
 function burst(x, y, color, radius) {
   if (!canAddEffect()) return;
-  state.effects.push({ type: "burst", x, y, color, radius, life: 0.5, maxLife: 0.5 });
+  spawnEffect({ type: "burst", x, y, color, radius: isLowPowerMode() ? radius * 0.72 : radius, life: 0.38, maxLife: 0.38 });
 }
 
 function ripple(x, y, color, radius) {
   if (!canAddEffect()) return;
-  state.effects.push({ type: "ripple", x, y, color, radius, life: 0.45, maxLife: 0.45 });
+  spawnEffect({ type: "ripple", x, y, color, radius: isLowPowerMode() ? radius * 0.7 : radius, life: 0.34, maxLife: 0.34 });
 }
 
 function sparks(x, y, count) {
   if (!canAddEffect()) return;
-  state.effects.push({ type: "spark", x, y, count: isLowPowerMode() ? Math.min(count, 6) : count, seed: Math.random() * 6, life: 0.34, maxLife: 0.34 });
+  spawnEffect({ type: "spark", x, y, count: isLowPowerMode() ? Math.min(count, 4) : count, seed: Math.random() * 6, life: 0.28, maxLife: 0.28 });
 }
 
 function hitFlash(x, y, color, radius) {
   if (!canAddEffect()) return;
-  state.effects.push({ type: "hit", x, y, color, radius, life: 0.22, maxLife: 0.22 });
+  spawnEffect({ type: "hit", x, y, color, radius: isLowPowerMode() ? radius * 0.72 : radius, life: 0.18, maxLife: 0.18 });
 }
 
 function deathPoof(x, y, color) {
   if (!canAddEffect()) return;
-  state.effects.push({ type: "death", x, y, color, count: isLowPowerMode() ? 7 : 12, seed: Math.random() * 6, life: 0.5, maxLife: 0.5 });
+  spawnEffect({ type: "death", x, y, color, count: isLowPowerMode() ? 5 : 10, seed: Math.random() * 6, life: 0.38, maxLife: 0.38 });
+}
+
+function createSpirit(unit) {
+  const life = isLowPowerMode() ? 0.82 : 1.08;
+  spawnSpirit({
+    x: unit.x,
+    y: unit.y - unit.size * 0.65,
+    startY: unit.y - unit.size * 0.65,
+    rise: isLowPowerMode() ? 56 : 88,
+    size: unit.size,
+    seed: Math.random() * 8,
+    color: unit.team === "player" ? "#d9fbff" : "#fff8df",
+    life,
+    maxLife: life,
+  });
 }
 
 function screenShake(amount) {
@@ -3484,42 +3797,42 @@ function screenShake(amount) {
 
 function ember(x, y, count) {
   if (!canAddEffect()) return;
-  state.effects.push({ type: "ember", x, y, count: isLowPowerMode() ? Math.min(count, 7) : count, seed: Math.random() * 6, life: 0.7, maxLife: 0.7 });
+  spawnEffect({ type: "ember", x, y, count: isLowPowerMode() ? Math.min(count, 4) : count, seed: Math.random() * 6, life: 0.5, maxLife: 0.5 });
 }
 
 function frost(x, y, count) {
   if (!canAddEffect()) return;
-  state.effects.push({ type: "frost", x, y, count: isLowPowerMode() ? Math.min(count, 7) : count, seed: Math.random() * 6, life: 0.62, maxLife: 0.62 });
+  spawnEffect({ type: "frost", x, y, count: isLowPowerMode() ? Math.min(count, 4) : count, seed: Math.random() * 6, life: 0.45, maxLife: 0.45 });
 }
 
 function soul(x, y, color) {
   if (!canAddEffect()) return;
-  state.effects.push({ type: "soul", x, y, color, life: 0.62, maxLife: 0.62 });
+  spawnEffect({ type: "soul", x, y, color, life: 0.48, maxLife: 0.48 });
 }
 
 function beam(x1, y1, x2, y2, color) {
   if (!canAddEffect()) return;
-  state.effects.push({ type: "beam", x1, y1, x2, y2, color, life: 0.34, maxLife: 0.34 });
+  spawnEffect({ type: "beam", x1, y1, x2, y2, color, life: 0.24, maxLife: 0.24 });
 }
 
 function auraPulse(x, y, color) {
   if (!canAddEffect()) return;
-  state.effects.push({ type: "aura", x, y, color, radius: 135, life: 0.55, maxLife: 0.55 });
+  spawnEffect({ type: "aura", x, y, color, radius: isLowPowerMode() ? 92 : 135, life: 0.42, maxLife: 0.42 });
 }
 
 function charm(x, y) {
   if (!canAddEffect()) return;
-  state.effects.push({ type: "charm", x, y, color: "#ff9bd5", life: 0.7, maxLife: 0.7 });
+  spawnEffect({ type: "charm", x, y, color: "#ff9bd5", life: 0.46, maxLife: 0.46 });
 }
 
 function slash(x, y, color) {
   if (!canAddEffect()) return;
-  state.effects.push({ type: "slash", x, y, color, life: 0.28, maxLife: 0.28 });
+  spawnEffect({ type: "slash", x, y, color, life: 0.2, maxLife: 0.2 });
 }
 
 function bolt(x, y) {
   if (!canAddEffect()) return;
-  state.effects.push({ type: "bolt", x, y, life: 0.34, maxLife: 0.34 });
+  spawnEffect({ type: "bolt", x, y, life: 0.24, maxLife: 0.24 });
 }
 
 function shakeLine(lane) {
@@ -3620,12 +3933,25 @@ function updateUi(force = false) {
 }
 
 function loop(time) {
+  state.rafId = 0;
   const maxDt = isLowPowerMode() ? 0.12 : 0.04;
   const dt = state.lastTime ? Math.min(maxDt, (time - state.lastTime) / 1000) : 0;
   state.lastTime = time;
+  updateFpsStats(dt);
+  resetFramePerf();
+  const updateStart = performance.now();
   update(dt);
+  state.perf.updateMs = performance.now() - updateStart;
+  const drawStart = performance.now();
   draw();
-  if (!state.gameOver || !state.started) requestAnimationFrame(loop);
+  state.perf.drawMs = performance.now() - drawStart;
+  updatePerfPanel();
+  if (!state.gameOver || !state.started) startLoop();
+}
+
+function startLoop() {
+  if (state.rafId) return;
+  state.rafId = requestAnimationFrame(loop);
 }
 
 laneButtons.forEach((button) => {
@@ -3713,16 +4039,24 @@ soundToggle.addEventListener("click", () => {
   saveSettings();
   if (state.soundOn) sound("select");
 });
+graphicsToggle?.addEventListener("click", () => {
+  state.lowGraphics = !state.lowGraphics;
+  renderGraphicsToggle();
+  invalidateArenaCache();
+  saveSettings();
+  sound("select");
+});
 dailyBonusBtn?.addEventListener("click", claimDailyBonus);
 
 loadSave();
 unlockCardsForLevel();
 renderWallet();
 renderProgress();
+renderGraphicsToggle();
 renderHand();
 renderDeckEditor();
 renderDifficulty();
 renderCampaignMap();
 window.IronClashPlatform?.ready();
-requestAnimationFrame(loop);
+startLoop();
 
